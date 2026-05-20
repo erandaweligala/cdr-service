@@ -2,7 +2,6 @@ package com.csg.airtel.aaa4j.application.consumer;
 
 import com.csg.airtel.aaa4j.domain.model.connectionhistory.AccountingEvent;
 import com.csg.airtel.aaa4j.domain.service.connectionhistory.SessionService;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import io.smallrye.common.annotation.Blocking;
 import io.smallrye.mutiny.Uni;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -21,11 +20,9 @@ public class AccountingKafkaConsumer {
     private static final Logger LOG = Logger.getLogger(AccountingKafkaConsumer.class);
 
     private final SessionService sessionService;
-    private final ObjectMapper objectMapper;
 
-    public AccountingKafkaConsumer(SessionService sessionService, ObjectMapper objectMapper) {
+    public AccountingKafkaConsumer(SessionService sessionService) {
         this.sessionService = sessionService;
-        this.objectMapper = objectMapper;
     }
 
     /**
@@ -42,7 +39,7 @@ public class AccountingKafkaConsumer {
         AccountingEvent event = message.getPayload();
 
         try {
-            LOG.infof("Received event: %s",objectMapper.writeValueAsString(event));
+            LOG.infof("Received event: %s", event.getEventId());
 
             switch (event.getEventType().toUpperCase()) {
                 case "ACCOUNTING_START":
@@ -91,7 +88,7 @@ public class AccountingKafkaConsumer {
         AccountingEvent event = message.getPayload();
 
         try {
-            LOG.infof("Received event: %s",objectMapper.writeValueAsString(event));
+            LOG.infof("Received event: %s", event.getEventId());
 
             switch (event.getEventType().toUpperCase()) {
                 case "ACCOUNTING_START":

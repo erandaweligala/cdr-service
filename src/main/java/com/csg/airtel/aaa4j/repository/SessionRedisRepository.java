@@ -2,6 +2,7 @@ package com.csg.airtel.aaa4j.repository;
 
 import com.csg.airtel.aaa4j.domain.model.connectionhistory.Session;
 import io.quarkus.redis.datasource.RedisDataSource;
+import io.quarkus.redis.datasource.keys.KeyCommands;
 import io.quarkus.redis.datasource.value.ValueCommands;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -18,10 +19,12 @@ public class SessionRedisRepository {
     private static final String SESSION_KEY_PREFIX = "cdr::";
 
     private final ValueCommands<String, Session> sessionCommands;
+    private final KeyCommands<String> keyCommands;
 
     @Inject
     public SessionRedisRepository(RedisDataSource redisDataSource) {
         this.sessionCommands = redisDataSource.value(Session.class);
+        this.keyCommands = redisDataSource.key(String.class);
     }
 
     /**
@@ -31,7 +34,7 @@ public class SessionRedisRepository {
         try {
             String key = buildKey(uniqueSessionId);
             sessionCommands.set(key, session);
-//            sessionCommands.expire(key, SESSION_TTL);
+            keyCommands.expire(key, SESSION_TTL);
             LOG.infof("Session saved to Redis: %s", session.getSessionId());
         } catch (Exception e) {
             LOG.errorf(e, "Error saving session to Redis: %s", session.getSessionId());
@@ -76,7 +79,7 @@ public class SessionRedisRepository {
      */
     public boolean exists(String sessionId) {
         try {
-            return findBySessionId(sessionId).isPresent();
+            return keyCommands.exists(buildKey(sessionId));
         } catch (Exception e) {
             LOG.errorf(e, "Error checking session existence: %s", sessionId);
             return false;
@@ -89,7 +92,7 @@ public class SessionRedisRepository {
     public void refreshTTL(String sessionId) {
         try {
             String key = buildKey(sessionId);
-//            sessionCommands.expire(key, SESSION_TTL);
+            keyCommands.expire(key, SESSION_TTL);
             LOG.debugf("Session TTL refreshed: %s", sessionId);
         } catch (Exception e) {
             LOG.errorf(e, "Error refreshing session TTL: %s", sessionId);

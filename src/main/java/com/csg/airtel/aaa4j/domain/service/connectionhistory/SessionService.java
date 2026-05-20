@@ -35,14 +35,17 @@ public class SessionService {
     public void processStartEvent(AccountingEvent event) {
         LOG.infof("Processing START event: %s", event.getEventId());
         String uniqueSessionId = getUniqueIdFromSessionCDR(event.getPayload().getSession());
-        Session session = getOrCreateSession(uniqueSessionId, event);
-
-        if (redisRepository.findBySessionId(uniqueSessionId).isPresent()) {
+        Optional<Session> existing = redisRepository.findBySessionId(uniqueSessionId);
+        Session session;
+        if (existing.isPresent()) {
+            session = existing.get();
             LOG.warnf("Session already exists for START event: %s, updating existing session", session.getSessionId());
             updateSessionFromStart(session, event);
+        } else {
+            session = createSession(event);
         }
-        addInstanceInfoAndSave(session, event, true,uniqueSessionId);
-        elasticsearchService.indexSession(session,uniqueSessionId);
+        addInstanceInfoAndSave(session, event, true, uniqueSessionId);
+        elasticsearchService.indexSession(session, uniqueSessionId);
 
         LOG.infof("START event processed successfully: %s", session.getSessionId());
     }
