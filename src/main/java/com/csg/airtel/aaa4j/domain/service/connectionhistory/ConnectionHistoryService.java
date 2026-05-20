@@ -38,6 +38,7 @@ public class ConnectionHistoryService {
 
     private final ElasticsearchClient client;
     private final ServiceExceptionHandler handler;
+    private volatile boolean indexExistsCached = false;
 
     public ConnectionHistoryService(ElasticsearchClient client, ServiceExceptionHandler handler) {
         this.client = client;
@@ -81,22 +82,22 @@ public class ConnectionHistoryService {
                             .query(q -> q.bool(b -> {
 
                                 if (username != null && !username.isEmpty())
-                                    b.must(query -> query.term(term -> term
+                                    b.filter(query -> query.term(term -> term
                                             .field("userName.keyword")
                                             .value(username)));
 
                                 if (connectionStatus != null && !connectionStatus.isEmpty())
-                                    b.must(query -> query.term(term -> term
+                                    b.filter(query -> query.term(term -> term
                                             .field("connectionStatus.keyword")
                                             .value(connectionStatus)));
 
                                 if (sessionId != null && !sessionId.isEmpty())
-                                    b.must(query -> query.term(term -> term
+                                    b.filter(query -> query.term(term -> term
                                             .field("sessionId.keyword")
                                             .value(sessionId)));
 
                                 if (groupId != null && !groupId.isEmpty())
-                                    b.must(query -> query.term(term -> term
+                                    b.filter(query -> query.term(term -> term
                                             .field("groupId.keyword")
                                             .value(groupId)));
 
@@ -219,12 +220,12 @@ public class ConnectionHistoryService {
         }
     }
 
-    /**
-     * Check if index exists
-     */
     private boolean indexExists() {
+        if (indexExistsCached) return true;
         try {
-            return client.indices().exists(e -> e.index(sessionsIndex)).value();
+            boolean exists = client.indices().exists(e -> e.index(sessionsIndex)).value();
+            if (exists) indexExistsCached = true;
+            return exists;
         } catch (Exception e) {
             log.error("Error checking if index exists: ", e);
             return false;
