@@ -1,0 +1,32 @@
+package com.csg.airtel.aaa4j.domain.model.connectionhistory;
+
+import com.fasterxml.jackson.annotation.JsonProperty;
+import lombok.*;
+
+
+@Getter
+@Setter
+@Builder
+@NoArgsConstructor
+@AllArgsConstructor
+public  class Payload {
+
+    @JsonProperty("session")
+    private SessionCdr session;
+
+    @JsonProperty("user")
+    private User user;
+
+    @JsonProperty("network")
+    private Network network;
+
+    @JsonProperty("accounting")
+    private Accounting accounting;
+
+    @JsonProperty("coa")
+    private COA coa;
+
+    @JsonProperty("radius")
+    private Radius radius;
+}
+

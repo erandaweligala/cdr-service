@@ -1,0 +1,50 @@
+config_ordinal: 500
+quarkus:
+  http:
+    port: 9907
+  log:
+    level: INFO
+  console:
+    color: true
+  redis:
+    client-type: sentinel
+    hosts: redis://redis-cluster.cluster-redis.svc.cluster.local:26379
+    master-name: mymaster
+    role: master
+    password: AAAtest_Redis_Pass_w0rd!
+  test:
+    continuous-testing: disabled
+
+# Elasticsearch config - now with separate host, port, protocol
+elasticsearch:
+  host: elasticsearch.efk.svc.cluster.local
+  port: 9200
+  protocol: http
+  username: elastickib
+  password: Yu*9nkank
+
+sessions-data: radius-sessions
+
+kafka:
+  bootstrap:
+    servers: kafka-headless.cluster-dc.svc.cluster.local:9092
+
+mp:
+  messaging:
+    incoming:
+      accounting-cdr-events:
+        connector: smallrye-kafka
+        topic: cdr-event
+        group.id: accounting-service
+        value.deserializer: io.quarkus.kafka.client.serialization.ObjectMapperDeserializer
+        key.deserializer: org.apache.kafka.common.serialization.StringDeserializer
+        auto.offset.reset: earliest
+        enable.auto.commit: true
+        max.poll.records: 500
+        max.poll.interval.ms: 300000
+        session.timeout.ms: 30000
+        fetch.min.bytes: 1024
+        fetch.max.bytes: 52428800
+        max.partition.fetch.bytes: 10485760
+        receive.buffer.bytes: 65536
+        failure-strategy: ignore

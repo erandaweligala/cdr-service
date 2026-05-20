@@ -1,0 +1,6 @@
+elasticsearch:
+  host: localhost
+  username: elastic
+  password: changeme
+  devservices:
+    enabled : false

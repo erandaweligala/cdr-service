@@ -1,0 +1,129 @@
+quarkus:
+  http:
+    port: 9907
+
+  console:
+    color: true
+  redis:
+    client-type: sentinel
+    hosts: redis://redis-cluster.cluster-redis.svc.cluster.local:26379
+    master-name: mymaster
+    role: master
+    password: AAAtest_Redis_Pass_w0rd!
+
+  log:
+    level: INFO
+    console:
+      format: "[%d{yyyy-MM-dd'T'HH:mm:ss.SSSZ}] %-5p [%c][%t][%X{traceId}][%X{userName}][%X{sessionId}] %s%e%n"
+      async:
+        queue-length: 10000
+        overflow: discard # Fixed the "discard file not create" typo
+
+    # File Configuration
+    file:
+      path: /var/log/dte/${HOSTNAME:unknown}.log
+      format: "[%d{yyyy-MM-dd'T'HH:mm:ss.SSSZ}] %-5p [%c][%t][%X{traceId}][%X{userName}][%X{sessionId}] %s%e%n"
+      async:
+        enable: true
+        queue-length: 20000
+        overflow: discard
+      rotation:
+        max-file-size: 100M
+        max-backup-index: 15
+        rotate-on-boot: true
+      enabled: true
+
+    # Category Specific Levels
+    category:
+      "org.apache.kafka":
+        level: INFO
+      "io.smallrye.reactive.messaging.kafka":
+        level: INFO
+      "com.csg.airtel.aaa4j":
+        level: INFO
+
+
+
+#  redis:
+#    client-type: sentinel
+#    hosts: redis://redis-cluster-headless.csg-aaa-query-cache.svc.cluster.local:26379
+#    master-name: mymaster
+#    role: master
+#    password: S3cure_Redis_Pass_w0rd!
+#    max-pool-size: 600
+#    max-waiting-handlers: 12000
+#    max-pool-waiting: 3000
+#    pool-recycle-timeout: 240000
+#    reconnect-attempts: 3
+#    reconnect-interval: 500
+#    pool-cleaner-interval: 20000
+#    timeout: 120000
+  test:
+    continuous-testing: disabled
+#  devservices:
+#    enabled: true
+
+# Elasticsearch config - now with separate host, port, protocol
+#elasticsearch:
+#  host: localhost
+#  port: 9200
+#  protocol: http
+#  username: elastic
+#  password: elastic123
+elasticsearch:
+  host: elasticsearch.efk.svc.cluster.local
+  port: 9200
+  protocol: http
+  username: elastickib
+  password: Yu*9nkank
+
+sessions-data: radius-sessions
+#kafka:
+#  bootstrap:
+#    servers: >
+#      confluent-ctrl-0-svc.csg-aaa-query-cache.svc.cluster.local:9092,
+#      confluent-ctrl-1-svc.csg-aaa-query-cache.svc.cluster.local:9092,
+#      confluent-ctrl-2-svc.csg-aaa-query-cache.svc.cluster.local:9092,
+#      confluent-ctrl-3-svc.csg-aaa-query-cache.svc.cluster.local:9092,
+#      confluent-ctrl-4-svc.csg-aaa-query-cache.svc.cluster.local:9092
+kafka:
+  bootstrap:
+    servers: kafka-headless.cluster-dc.svc.cluster.local:9092
+
+
+mp:
+  messaging:
+    incoming:
+      accounting-cdr-events:
+        connector: smallrye-kafka
+        topic: cdr-event-dc
+        group.id: accounting-service
+        value.deserializer: io.quarkus.kafka.client.serialization.ObjectMapperDeserializer
+        key.deserializer: org.apache.kafka.common.serialization.StringDeserializer
+        auto.offset.reset: earliest
+        enable.auto.commit: true
+        max.poll.records: 500
+        max.poll.interval.ms: 300000
+        session.timeout.ms: 30000
+        fetch.min.bytes: 1024
+        fetch.max.bytes: 52428800
+        max.partition.fetch.bytes: 10485760
+        receive.buffer.bytes: 65536
+        failure-strategy: ignore
+
+        accounting-cdr-events-mirror:
+          connector: smallrye-kafka
+          topic: cdr-event-dc
+          group.id: accounting-service
+          value.deserializer: io.quarkus.kafka.client.serialization.ObjectMapperDeserializer
+          key.deserializer: org.apache.kafka.common.serialization.StringDeserializer
+          auto.offset.reset: earliest
+          enable.auto.commit: true
+          max.poll.records: 500
+          max.poll.interval.ms: 300000
+          session.timeout.ms: 30000
+          fetch.min.bytes: 1024
+          fetch.max.bytes: 52428800
+          max.partition.fetch.bytes: 10485760
+          receive.buffer.bytes: 65536
+          failure-strategy: ignore
