@@ -9,9 +9,12 @@ import jakarta.inject.Singleton;
 import org.apache.http.HttpHost;
 import org.apache.http.auth.AuthScope;
 import org.apache.http.auth.UsernamePasswordCredentials;
+import org.apache.http.client.config.RequestConfig;
 import org.apache.http.impl.client.BasicCredentialsProvider;
+import org.apache.http.impl.nio.reactor.IOReactorConfig;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.elasticsearch.client.RestClient;
+import org.elasticsearch.client.RestClientBuilder;
 
 @ApplicationScoped
 public class ElasticsearchProducer {
@@ -31,29 +34,62 @@ public class ElasticsearchProducer {
     @ConfigProperty(name = "elasticsearch.password", defaultValue = "")
     String password;
 
+    @ConfigProperty(name = "elasticsearch.pool.max-conn-total", defaultValue = "400")
+    int maxConnTotal;
+
+    @ConfigProperty(name = "elasticsearch.pool.max-conn-per-route", defaultValue = "200")
+    int maxConnPerRoute;
+
+    @ConfigProperty(name = "elasticsearch.pool.io-thread-count", defaultValue = "8")
+    int ioThreadCount;
+
+    @ConfigProperty(name = "elasticsearch.pool.connect-timeout-ms", defaultValue = "5000")
+    int connectTimeoutMs;
+
+    @ConfigProperty(name = "elasticsearch.pool.socket-timeout-ms", defaultValue = "60000")
+    int socketTimeoutMs;
+
+    @ConfigProperty(name = "elasticsearch.pool.connection-request-timeout-ms", defaultValue = "5000")
+    int connectionRequestTimeoutMs;
+
     @Produces
     @Singleton
     public ElasticsearchAsyncClient createAsyncClient() {
-        RestClient restClient;
+        RestClientBuilder builder = RestClient.builder(new HttpHost(serverHost, serverPort, protocol));
 
-        if (userName != null && !userName.isEmpty()) {
-            BasicCredentialsProvider credProvider = new BasicCredentialsProvider();
+        IOReactorConfig ioReactorConfig = IOReactorConfig.custom()
+                .setIoThreadCount(ioThreadCount)
+                .setSoKeepAlive(true)
+                .build();
+
+        boolean useAuth = userName != null && !userName.isEmpty();
+        BasicCredentialsProvider credProvider = null;
+        if (useAuth) {
+            credProvider = new BasicCredentialsProvider();
             credProvider.setCredentials(
                     AuthScope.ANY,
                     new UsernamePasswordCredentials(userName, password)
             );
-
-            restClient = RestClient.builder(
-                    new HttpHost(serverHost, serverPort, protocol)
-            ).setHttpClientConfigCallback(httpClientBuilder ->
-                    httpClientBuilder.setDefaultCredentialsProvider(credProvider)
-            ).build();
-        } else {
-            restClient = RestClient.builder(
-                    new HttpHost(serverHost, serverPort, protocol)
-            ).build();
         }
 
+        final BasicCredentialsProvider finalCredProvider = credProvider;
+        builder.setHttpClientConfigCallback(httpClientBuilder -> {
+            httpClientBuilder
+                    .setMaxConnTotal(maxConnTotal)
+                    .setMaxConnPerRoute(maxConnPerRoute)
+                    .setDefaultIOReactorConfig(ioReactorConfig);
+            if (finalCredProvider != null) {
+                httpClientBuilder.setDefaultCredentialsProvider(finalCredProvider);
+            }
+            return httpClientBuilder;
+        });
+
+        builder.setRequestConfigCallback(requestConfigBuilder -> requestConfigBuilder
+                .setConnectTimeout(connectTimeoutMs)
+                .setSocketTimeout(socketTimeoutMs)
+                .setConnectionRequestTimeout(connectionRequestTimeoutMs));
+
+        RestClient restClient = builder.build();
         RestClientTransport transport = new RestClientTransport(restClient, new JacksonJsonpMapper());
         return new ElasticsearchAsyncClient(transport);
     }

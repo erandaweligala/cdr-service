@@ -13,6 +13,12 @@ class ElasticsearchProducerTest {
     @BeforeEach
     void setUp() {
         producer = new ElasticsearchProducer();
+        producer.maxConnTotal = 400;
+        producer.maxConnPerRoute = 200;
+        producer.ioThreadCount = 8;
+        producer.connectTimeoutMs = 5000;
+        producer.socketTimeoutMs = 60000;
+        producer.connectionRequestTimeoutMs = 5000;
     }
 
     @Test
