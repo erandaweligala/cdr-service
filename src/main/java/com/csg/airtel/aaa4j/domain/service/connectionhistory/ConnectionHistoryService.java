@@ -21,9 +21,8 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
-import java.time.Instant;
-import java.time.LocalDateTime;
-import java.time.ZoneId;
+import java.time.*;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -38,7 +37,6 @@ public class ConnectionHistoryService {
 
     private final ElasticsearchClient client;
     private final ServiceExceptionHandler handler;
-    private volatile boolean indexExistsCached = false;
 
     public ConnectionHistoryService(ElasticsearchClient client, ServiceExceptionHandler handler) {
         this.client = client;
@@ -50,30 +48,28 @@ public class ConnectionHistoryService {
             String connectionStatus,
             String sessionId,
             String groupId,
-            String startTime,
-            String endTime,
+            String startDate,
+            String endDate,
             int pageSize,
             int page
     ) throws BaseException {
 
         try {
             log.info("Start fetching session info list.");
-            log.debug("Fetching sessions - userName: {}, status: {}, sessionId: {}, groupId: {}, page: {}/{}",
-                    username, connectionStatus, sessionId, groupId, page, pageSize);
 
-            // Check if index exists first
-            if (!indexExists()) {
-                log.error("Index does not exist: {}", sessionsIndex);
-                throw new BaseException(
-                        "Elasticsearch index not found: " + sessionsIndex,
-                        "INDEX_NOT_FOUND",
-                        HttpStatus.SC_SERVICE_UNAVAILABLE,
-                        "ES_001"
-                );
-            }
+            String startTime = startDate != null ? startDate : LocalDate.now().minusDays(7).toString();
+            String endTime = endDate != null ? endDate : LocalDate.now().toString();
+
+            List<String> targetIndices = getTargetIndices(startTime, endTime);  // no null check needed
+
+            Instant endInstant = LocalDateTime.parse(endTime)
+                    .toLocalDate()
+                    .atTime(23, 59, 59)
+                    .atZone(ZoneId.of("UTC"))
+                    .toInstant();
 
             SearchResponse<Session> response = client.search(s -> s
-                            .index(sessionsIndex)
+                            .index(targetIndices)          // was: sessionsIndex (wildcard)
                             .from((pageSize * page) - pageSize)
                             .size(pageSize)
                             .sort(srt -> srt
@@ -82,53 +78,44 @@ public class ConnectionHistoryService {
                             .query(q -> q.bool(b -> {
 
                                 if (username != null && !username.isEmpty())
-                                    b.filter(query -> query.term(term -> term
+                                    b.must(query -> query.term(term -> term
                                             .field("userName.keyword")
                                             .value(username)));
 
                                 if (connectionStatus != null && !connectionStatus.isEmpty())
-                                    b.filter(query -> query.term(term -> term
+                                    b.must(query -> query.term(term -> term
                                             .field("connectionStatus.keyword")
                                             .value(connectionStatus)));
 
                                 if (sessionId != null && !sessionId.isEmpty())
-                                    b.filter(query -> query.term(term -> term
+                                    b.must(query -> query.term(term -> term
                                             .field("sessionId.keyword")
                                             .value(sessionId)));
 
                                 if (groupId != null && !groupId.isEmpty())
-                                    b.filter(query -> query.term(term -> term
+                                    b.must(query -> query.term(term -> term
                                             .field("groupId.keyword")
                                             .value(groupId)));
 
-                                if (startTime != null || endTime != null) {
-                                    b.filter(filterQ -> filterQ.range(rangeQ -> {
-                                        rangeQ.field("startTime");
-                                        if (startTime != null)
-                                            rangeQ.gte(JsonData.of(parseDate(startTime).toEpochMilli()));
-                                        if (endTime != null)
-                                            rangeQ.lte(JsonData.of(parseDate(endTime).toEpochMilli()));
-                                        return rangeQ;
-                                    }));
-                                }
+                                // startTime and endTime always present now
+                                b.filter(filterQ -> filterQ.range(rangeQ -> {
+                                    rangeQ.field("startTime");
+                                    rangeQ.gte(JsonData.of(parseDate(startTime).toEpochMilli()));
+                                    rangeQ.lte(JsonData.of(endInstant.toEpochMilli()));
+                                    return rangeQ;
+                                }));
 
                                 return b;
                             })),
-                    Session.class  // CHANGED: Use Session.class instead of Object.class
+                    Session.class
             );
 
-            log.debug("Elasticsearch response - total hits: {}",
-                    response.hits().total() != null ? response.hits().total().value() : 0);
-
             List<Session> data = new ArrayList<>();
-
-            if (! response.hits().hits().isEmpty()) {
+            if (!response.hits().hits().isEmpty()) {
                 data = response.hits().hits().stream()
                         .map(Hit::source)
                         .toList();
             }
-
-            log.debug("Refined list of session data: {} records", data.size());
 
             assert response.hits().total() != null;
             PageDetails pageDetails = new PageDetails(
@@ -137,8 +124,7 @@ public class ConnectionHistoryService {
                     data.size()
             );
 
-            log.info("Session data fetched successfully. Total records: {}",
-                    pageDetails.getTotalRecords());
+            log.info("Session data fetched successfully. Total records: {}", pageDetails.getTotalRecords());
 
             return BaseResponse.success(
                     ResponseCodeEnum.SUCCESSFUL.description(),
@@ -171,7 +157,7 @@ public class ConnectionHistoryService {
 
             // Use GET API instead of SEARCH API for ID lookup
             GetResponse<Session> response = client.get(g -> g
-                            .index(sessionsIndex)
+                            .index(getSearchIndex())
                             .id(sessionId),
                     Session.class
             );
@@ -220,14 +206,14 @@ public class ConnectionHistoryService {
         }
     }
 
+    /**
+     * Check if index exists
+     */
     private boolean indexExists() {
-        if (indexExistsCached) return true;
         try {
-            boolean exists = client.indices().exists(e -> e.index(sessionsIndex)).value();
-            if (exists) indexExistsCached = true;
-            return exists;
+            return client.indices().exists(e -> e.index(getSearchIndex())).value();
         } catch (Exception e) {
-            log.error("Error checking if index exists: ", e);
+            log.error("Error checking if index exists for pattern: {}", getSearchIndex(), e);
             return false;
         }
     }
@@ -263,5 +249,22 @@ public class ConnectionHistoryService {
                 .parse(date)
                 .atZone(ZoneId.of("UTC"))
                 .toInstant();
+    }
+
+    private String getSearchIndex() {
+        return sessionsIndex + "-*";
+    }
+
+    private List<String> getTargetIndices(String startTime, String endTime) {
+        LocalDate from = parseDate(startTime).atZone(ZoneOffset.UTC).toLocalDate();
+        LocalDate to   = parseDate(endTime).atZone(ZoneOffset.UTC).toLocalDate();
+
+        List<String> indices = new ArrayList<>();
+        LocalDate current = from;
+        while (!current.isAfter(to)) {
+            indices.add(sessionsIndex + "-" + current.format(DateTimeFormatter.ofPattern("yyyy.MM.dd")));
+            current = current.plusDays(1);
+        }
+        return indices;
     }
 }

@@ -10,6 +10,9 @@ import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
 import java.io.IOException;
+import java.time.LocalDate;
+import java.time.ZoneOffset;
+import java.time.format.DateTimeFormatter;
 
 @ApplicationScoped
 public class ElasticSearchService {
@@ -25,10 +28,10 @@ public class ElasticSearchService {
     /**
      * Index a session (works for both active and completed sessions)
      */
-    public void indexSession(Session session, String id) {
+    public void indexSession(Session session, String id,  String targetIndex) {
         try {
             IndexRequest<Session> request = IndexRequest.of(i -> i
-                    .index(sessionsIndex)
+                    .index(targetIndex)  // was: sessionsIndex
                     .id(id)
                     .document(session)
             );
@@ -40,5 +43,9 @@ public class ElasticSearchService {
             LOG.errorf(e, "Failed to index session: %s", session.getSessionId());
             throw new RuntimeException("Failed to index session", e);
         }
+    }
+
+    public String getCurrentIndex() {
+        return sessionsIndex + "-" + LocalDate.now(ZoneOffset.UTC).format(DateTimeFormatter.ofPattern("yyyy.MM.dd"));
     }
 }

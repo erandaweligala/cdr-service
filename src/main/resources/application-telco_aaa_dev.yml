@@ -9,9 +9,9 @@ quarkus:
   redis:
     client-type: sentinel
     hosts: redis://redis-cluster.cluster-redis.svc.cluster.local:26379
-    master-name: mymaster
-    role: master
-    password: AAAtest_Redis_Pass_w0rd!
+    master-name: "${REDIS_MASTER_NAME}"
+    role: "${REDIS_ROLE}"
+    password: "${REDIS_PASSWORD}"
   test:
     continuous-testing: disabled
 
@@ -20,8 +20,8 @@ elasticsearch:
   host: elasticsearch.efk.svc.cluster.local
   port: 9200
   protocol: http
-  username: elastickib
-  password: Yu*9nkank
+  username: "${ES_USER}"
+  password: "${ES_PASSWORD}"
 
 sessions-data: radius-sessions
 

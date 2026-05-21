@@ -37,6 +37,7 @@ public class ConnectionHistoryResource {
             @QueryParam("page") @DefaultValue("1") int page
     ) throws BaseException {
         log.info("Controller Request Received : ConnectionHistoryResource : fetchSessionDetails");
+
         BaseResponse<Session> sessions = connectionHistoryService.fetchSessionDetails(
                 username,
                 connectionStatus,

@@ -14,6 +14,7 @@ import java.util.List;
 @NoArgsConstructor
 @Builder
 public class Session {
+    private String uniqueId;
     private String sessionId;
     private Date startTime;
     private Date endTime;
@@ -22,6 +23,7 @@ public class Session {
     private String userName;
     private String groupId;
     private Date updatedTime;
+    private String indexName;
     @Builder.Default  // This ensures the list is initialized when using builder
     private List<SessionInstanceInfo> sessionInstances = new ArrayList<>();
 }

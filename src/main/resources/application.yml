@@ -7,9 +7,9 @@ quarkus:
   redis:
     client-type: sentinel
     hosts: redis://redis-cluster.cluster-redis.svc.cluster.local:26379
-    master-name: mymaster
-    role: master
-    password: AAAtest_Redis_Pass_w0rd!
+    master-name: "${REDIS_MASTER_NAME}"
+    role: "${REDIS_ROLE}"
+    password: "${REDIS_PASSWORD}"
 
   log:
     level: INFO
@@ -74,18 +74,11 @@ elasticsearch:
   host: elasticsearch.efk.svc.cluster.local
   port: 9200
   protocol: http
-  username: elastickib
-  password: Yu*9nkank
+  username: "${ES_USER}"
+  password: "${ES_PASSWORD}"
 
 sessions-data: radius-sessions
-#kafka:
-#  bootstrap:
-#    servers: >
-#      confluent-ctrl-0-svc.csg-aaa-query-cache.svc.cluster.local:9092,
-#      confluent-ctrl-1-svc.csg-aaa-query-cache.svc.cluster.local:9092,
-#      confluent-ctrl-2-svc.csg-aaa-query-cache.svc.cluster.local:9092,
-#      confluent-ctrl-3-svc.csg-aaa-query-cache.svc.cluster.local:9092,
-#      confluent-ctrl-4-svc.csg-aaa-query-cache.svc.cluster.local:9092
+
 kafka:
   bootstrap:
     servers: kafka-headless.cluster-dc.svc.cluster.local:9092
@@ -97,7 +90,7 @@ mp:
       accounting-cdr-events:
         connector: smallrye-kafka
         topic: cdr-event-dc
-        group.id: accounting-service
+        group.id: cdr-service
         value.deserializer: io.quarkus.kafka.client.serialization.ObjectMapperDeserializer
         key.deserializer: org.apache.kafka.common.serialization.StringDeserializer
         auto.offset.reset: earliest
@@ -111,19 +104,19 @@ mp:
         receive.buffer.bytes: 65536
         failure-strategy: ignore
 
-        accounting-cdr-events-mirror:
-          connector: smallrye-kafka
-          topic: cdr-event-dc
-          group.id: accounting-service
-          value.deserializer: io.quarkus.kafka.client.serialization.ObjectMapperDeserializer
-          key.deserializer: org.apache.kafka.common.serialization.StringDeserializer
-          auto.offset.reset: earliest
-          enable.auto.commit: true
-          max.poll.records: 500
-          max.poll.interval.ms: 300000
-          session.timeout.ms: 30000
-          fetch.min.bytes: 1024
-          fetch.max.bytes: 52428800
-          max.partition.fetch.bytes: 10485760
-          receive.buffer.bytes: 65536
-          failure-strategy: ignore
+      accounting-cdr-events-mirror:
+        connector: smallrye-kafka
+        topic: dc.cdr-event-dr
+        group.id: cdr-service
+        value.deserializer: io.quarkus.kafka.client.serialization.ObjectMapperDeserializer
+        key.deserializer: org.apache.kafka.common.serialization.StringDeserializer
+        auto.offset.reset: earliest
+        enable.auto.commit: true
+        max.poll.records: 500
+        max.poll.interval.ms: 300000
+        session.timeout.ms: 30000
+        fetch.min.bytes: 1024
+        fetch.max.bytes: 52428800
+        max.partition.fetch.bytes: 10485760
+        receive.buffer.bytes: 65536
+        failure-strategy: ignore
