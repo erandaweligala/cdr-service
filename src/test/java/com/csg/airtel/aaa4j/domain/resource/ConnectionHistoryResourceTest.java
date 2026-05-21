@@ -3,9 +3,9 @@ package com.csg.airtel.aaa4j.domain.resource;
 import com.csg.airtel.aaa4j.domain.model.BaseResponse;
 import com.csg.airtel.aaa4j.domain.model.connectionhistory.Session;
 import com.csg.airtel.aaa4j.domain.model.connectionhistory.SessionInstanceInfo;
-import com.csg.airtel.aaa4j.domain.resource.ConnectionHistoryResource;
 import com.csg.airtel.aaa4j.domain.service.connectionhistory.ConnectionHistoryService;
 import com.csg.airtel.aaa4j.domain.util.exceptions.BaseException;
+import io.smallrye.mutiny.Uni;
 import jakarta.ws.rs.core.Response;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -31,13 +31,12 @@ class ConnectionHistoryResourceTest {
 
     @BeforeEach
     void setUp() {
-        sessionResponse = new BaseResponse<>(null,null,null,null);
-        sessionInstanceResponse = new BaseResponse<>(null,null,null,null);
+        sessionResponse = new BaseResponse<>(null, null, null, null);
+        sessionInstanceResponse = new BaseResponse<>(null, null, null, null);
     }
 
     @Test
     void getSessions_success() throws BaseException {
-        // given
         String username = "user1";
         String connectionStatus = "ACTIVE";
         String sessionId = "SID123";
@@ -48,59 +47,37 @@ class ConnectionHistoryResourceTest {
         int page = 1;
 
         when(connectionHistoryService.fetchSessionDetails(
-                username,
-                connectionStatus,
-                sessionId,
-                groupId,
-                startTime,
-                endTime,
-                pageSize,
-                page
-        )).thenReturn(sessionResponse);
+                username, connectionStatus, sessionId, groupId,
+                startTime, endTime, pageSize, page
+        )).thenReturn(Uni.createFrom().item(sessionResponse));
 
-        // when
         Response response = connectionHistoryResource.getSessions(
-                username,
-                connectionStatus,
-                sessionId,
-                groupId,
-                startTime,
-                endTime,
-                pageSize,
-                page
-        );
+                username, connectionStatus, sessionId, groupId,
+                startTime, endTime, pageSize, page
+        ).await().indefinitely();
 
-        // then
         assertNotNull(response);
         assertEquals(Response.Status.OK.getStatusCode(), response.getStatus());
         assertEquals(sessionResponse, response.getEntity());
 
         verify(connectionHistoryService, times(1))
                 .fetchSessionDetails(
-                        username,
-                        connectionStatus,
-                        sessionId,
-                        groupId,
-                        startTime,
-                        endTime,
-                        pageSize,
-                        page
+                        username, connectionStatus, sessionId, groupId,
+                        startTime, endTime, pageSize, page
                 );
         verifyNoMoreInteractions(connectionHistoryService);
     }
 
     @Test
     void getSessionInstances_success() throws BaseException {
-        // given
         String sessionId = "SID123";
 
         when(connectionHistoryService.fetchSessionInstances(sessionId))
-                .thenReturn(sessionInstanceResponse);
+                .thenReturn(Uni.createFrom().item(sessionInstanceResponse));
 
-        // when
-        Response response = connectionHistoryResource.getSessionInstances(sessionId);
+        Response response = connectionHistoryResource.getSessionInstances(sessionId)
+                .await().indefinitely();
 
-        // then
         assertNotNull(response);
         assertEquals(Response.Status.OK.getStatusCode(), response.getStatus());
         assertEquals(sessionInstanceResponse, response.getEntity());

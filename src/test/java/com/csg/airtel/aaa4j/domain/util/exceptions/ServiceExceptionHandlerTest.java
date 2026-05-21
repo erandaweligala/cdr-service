@@ -17,7 +17,7 @@ class ServiceExceptionHandlerTest {
     private final ServiceExceptionHandler handler = new ServiceExceptionHandler();
 
     @Test
-    void serviceLayerExceptionHandler_executionExceptionWithBaseCause_wrapsInnerBaseException() {
+    void serviceLayerExceptionHandler_executionExceptionWithBaseCause_unwrapsInnerBaseException() {
         BaseException inner = new BaseException(
                 "inner-msg",
                 "inner-reason",
@@ -27,19 +27,17 @@ class ServiceExceptionHandlerTest {
 
         ExecutionException ex = new ExecutionException("wrapper-msg", inner);
 
-        BaseException thrown = assertThrows(
-                BaseException.class,
-                () -> handler.serviceLayerExceptionHandler(ex)
-        );
+        BaseException result = handler.serviceLayerExceptionHandler(ex);
 
-        assertEquals("wrapper-msg", thrown.getMessage());
-        assertEquals(inner.getReason(), thrown.getReason());
-        assertEquals(inner.getHttpStatus(), thrown.getHttpStatus());
-        assertEquals(inner.getResultCode(), thrown.getResultCode());
+        assertSame(inner, result);
+        assertEquals(inner.getMessage(), result.getMessage());
+        assertEquals(inner.getReason(), result.getReason());
+        assertEquals(inner.getHttpStatus(), result.getHttpStatus());
+        assertEquals(inner.getResultCode(), result.getResultCode());
     }
 
     @Test
-    void serviceLayerExceptionHandler_completionExceptionWithBaseCause_wrapsInnerBaseException() {
+    void serviceLayerExceptionHandler_completionExceptionWithBaseCause_unwrapsInnerBaseException() {
         BaseException inner = new BaseException(
                 "inner-msg-2",
                 "inner-reason-2",
@@ -49,15 +47,13 @@ class ServiceExceptionHandlerTest {
 
         CompletionException ex = new CompletionException("completion-wrapper", inner);
 
-        BaseException thrown = assertThrows(
-                BaseException.class,
-                () -> handler.serviceLayerExceptionHandler(ex)
-        );
+        BaseException result = handler.serviceLayerExceptionHandler(ex);
 
-        assertEquals("completion-wrapper", thrown.getMessage());
-        assertEquals(inner.getReason(), thrown.getReason());
-        assertEquals(inner.getHttpStatus(), thrown.getHttpStatus());
-        assertEquals(inner.getResultCode(), thrown.getResultCode());
+        assertSame(inner, result);
+        assertEquals(inner.getMessage(), result.getMessage());
+        assertEquals(inner.getReason(), result.getReason());
+        assertEquals(inner.getHttpStatus(), result.getHttpStatus());
+        assertEquals(inner.getResultCode(), result.getResultCode());
     }
 
     @Test
@@ -65,30 +61,26 @@ class ServiceExceptionHandlerTest {
         Exception cause = new IllegalStateException("illegal");
         ExecutionException ex = new ExecutionException("exec-msg", cause);
 
-        BaseException thrown = assertThrows(
-                BaseException.class,
-                () -> handler.serviceLayerExceptionHandler(ex)
-        );
+        BaseException result = handler.serviceLayerExceptionHandler(ex);
 
-        assertEquals("exec-msg", thrown.getMessage());
-        assertEquals(ResponseCodeEnum.EXCEPTION_SERVICE_LAYER.description(), thrown.getReason());
-        assertEquals(HttpStatus.SC_INTERNAL_SERVER_ERROR, thrown.getHttpStatus());
-        assertEquals(ResponseCodeEnum.EXCEPTION_SERVICE_LAYER.code(), thrown.getResultCode());
+        assertNotNull(result);
+        assertEquals("illegal", result.getMessage());
+        assertEquals(ResponseCodeEnum.EXCEPTION_SERVICE_LAYER.description(), result.getReason());
+        assertEquals(HttpStatus.SC_INTERNAL_SERVER_ERROR, result.getHttpStatus());
+        assertEquals(ResponseCodeEnum.EXCEPTION_SERVICE_LAYER.code(), result.getResultCode());
     }
 
     @Test
     void serviceLayerExceptionHandler_nonExecutionOrCompletionException_usesServiceLayerDefaults() {
         Exception ex = new Exception("plain-ex");
 
-        BaseException thrown = assertThrows(
-                BaseException.class,
-                () -> handler.serviceLayerExceptionHandler(ex)
-        );
+        BaseException result = handler.serviceLayerExceptionHandler(ex);
 
-        assertEquals("plain-ex", thrown.getMessage());
-        assertEquals(ResponseCodeEnum.EXCEPTION_SERVICE_LAYER.description(), thrown.getReason());
-        assertEquals(HttpStatus.SC_INTERNAL_SERVER_ERROR, thrown.getHttpStatus());
-        assertEquals(ResponseCodeEnum.EXCEPTION_SERVICE_LAYER.code(), thrown.getResultCode());
+        assertNotNull(result);
+        assertEquals("plain-ex", result.getMessage());
+        assertEquals(ResponseCodeEnum.EXCEPTION_SERVICE_LAYER.description(), result.getReason());
+        assertEquals(HttpStatus.SC_INTERNAL_SERVER_ERROR, result.getHttpStatus());
+        assertEquals(ResponseCodeEnum.EXCEPTION_SERVICE_LAYER.code(), result.getResultCode());
     }
 
     // ───────────────────── elasticsearchExceptionHandler tests ─────────────────────
@@ -98,29 +90,25 @@ class ServiceExceptionHandlerTest {
         ElasticsearchException esEx = mock(ElasticsearchException.class);
         when(esEx.getMessage()).thenReturn("es-error");
 
-        BaseException thrown = assertThrows(
-                BaseException.class,
-                () -> handler.elasticsearchExceptionHandler(esEx)
-        );
+        BaseException result = handler.elasticsearchExceptionHandler(esEx);
 
-        assertEquals("es-error", thrown.getMessage());
-        assertEquals(ResponseCodeEnum.EXCEPTION_ELASTIC_CLIENT.description(), thrown.getReason());
-        assertEquals(HttpStatus.SC_SERVICE_UNAVAILABLE, thrown.getHttpStatus());
-        assertEquals(ResponseCodeEnum.EXCEPTION_ELASTIC_CLIENT.code(), thrown.getResultCode());
+        assertNotNull(result);
+        assertEquals("es-error", result.getMessage());
+        assertEquals(ResponseCodeEnum.EXCEPTION_ELASTIC_CLIENT.description(), result.getReason());
+        assertEquals(HttpStatus.SC_SERVICE_UNAVAILABLE, result.getHttpStatus());
+        assertEquals(ResponseCodeEnum.EXCEPTION_ELASTIC_CLIENT.code(), result.getResultCode());
     }
 
     @Test
     void elasticsearchExceptionHandler_otherException_usesInternalServerError() {
         Exception ex = new Exception("other-error");
 
-        BaseException thrown = assertThrows(
-                BaseException.class,
-                () -> handler.elasticsearchExceptionHandler(ex)
-        );
+        BaseException result = handler.elasticsearchExceptionHandler(ex);
 
-        assertEquals("other-error", thrown.getMessage());
-        assertEquals(ResponseCodeEnum.EXCEPTION_ELASTIC_CLIENT.description(), thrown.getReason());
-        assertEquals(HttpStatus.SC_INTERNAL_SERVER_ERROR, thrown.getHttpStatus());
-        assertEquals(ResponseCodeEnum.EXCEPTION_ELASTIC_CLIENT.code(), thrown.getResultCode());
+        assertNotNull(result);
+        assertEquals("other-error", result.getMessage());
+        assertEquals(ResponseCodeEnum.EXCEPTION_ELASTIC_CLIENT.description(), result.getReason());
+        assertEquals(HttpStatus.SC_INTERNAL_SERVER_ERROR, result.getHttpStatus());
+        assertEquals(ResponseCodeEnum.EXCEPTION_ELASTIC_CLIENT.code(), result.getResultCode());
     }
 }
