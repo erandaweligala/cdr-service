@@ -1,6 +1,6 @@
 package com.csg.airtel.aaa4j.domain.client;
 
-import co.elastic.clients.elasticsearch.ElasticsearchClient;
+import co.elastic.clients.elasticsearch.ElasticsearchAsyncClient;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -16,66 +16,54 @@ class ElasticsearchProducerTest {
     }
 
     @Test
-    void createClient_withoutAuthentication() {
-        // given (no username → no auth branch)
+    void createAsyncClient_withoutAuthentication() {
         producer.serverHost = "localhost";
         producer.serverPort = 9200;
         producer.protocol = "http";
         producer.userName = "";
         producer.password = "";
 
-        // when
-        ElasticsearchClient client = producer.createClient();
+        ElasticsearchAsyncClient client = producer.createAsyncClient();
 
-        // then
         assertNotNull(client);
     }
 
     @Test
-    void createClient_withAuthentication() {
-        // given (username provided → auth branch)
+    void createAsyncClient_withAuthentication() {
         producer.serverHost = "localhost";
         producer.serverPort = 9200;
         producer.protocol = "http";
         producer.userName = "elastic";
         producer.password = "password";
 
-        // when
-        ElasticsearchClient client = producer.createClient();
+        ElasticsearchAsyncClient client = producer.createAsyncClient();
 
-        // then
         assertNotNull(client);
     }
 
     @Test
-    void createClient_withCustomHostAndPort() {
-        // given
+    void createAsyncClient_withCustomHostAndPort() {
         producer.serverHost = "127.0.0.1";
         producer.serverPort = 9201;
         producer.protocol = "http";
         producer.userName = "";
         producer.password = "";
 
-        // when
-        ElasticsearchClient client = producer.createClient();
+        ElasticsearchAsyncClient client = producer.createAsyncClient();
 
-        // then
         assertNotNull(client);
     }
 
     @Test
-    void createClient_withNullUsername_treatedAsNoAuth() {
-        // given
+    void createAsyncClient_withNullUsername_treatedAsNoAuth() {
         producer.serverHost = "localhost";
         producer.serverPort = 9200;
         producer.protocol = "http";
-        producer.userName = null; // important edge case
+        producer.userName = null;
         producer.password = null;
 
-        // when
-        ElasticsearchClient client = producer.createClient();
+        ElasticsearchAsyncClient client = producer.createAsyncClient();
 
-        // then
         assertNotNull(client);
     }
 }
