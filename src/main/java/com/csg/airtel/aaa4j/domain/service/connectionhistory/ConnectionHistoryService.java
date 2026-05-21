@@ -212,8 +212,12 @@ public class ConnectionHistoryService {
                 );
             }
 
-            if (e.error().metadata() != null) {
-                log.error("Metadata: {}", e.error().metadata());
+            if (e.error().metadata() != null && !e.error().metadata().isEmpty()) {
+                String metadataStr = e.error().metadata().entrySet().stream()
+                        .map(entry -> entry.getKey() + "="
+                                + (entry.getValue() != null ? entry.getValue().toJson() : "null"))
+                        .collect(java.util.stream.Collectors.joining(", ", "{", "}"));
+                log.error("Metadata: {}", metadataStr);
             }
         }
         log.error("=====================================");
