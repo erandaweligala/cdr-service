@@ -2,7 +2,6 @@ package com.csg.airtel.aaa4j.application.consumer;
 
 import com.csg.airtel.aaa4j.domain.model.connectionhistory.AccountingEvent;
 import com.csg.airtel.aaa4j.domain.service.connectionhistory.SessionService;
-import io.smallrye.common.annotation.Blocking;
 import io.smallrye.mutiny.Uni;
 import jakarta.enterprise.context.ApplicationScoped;
 import org.eclipse.microprofile.reactive.messaging.Acknowledgment;
@@ -23,14 +22,12 @@ public class AccountingKafkaConsumer {
     }
 
     @Incoming("accounting-cdr-events")
-    @Blocking
     @Acknowledgment(Acknowledgment.Strategy.PRE_PROCESSING)
     public Uni<Void> consume(Message<AccountingEvent> message) {
         return processMessage(message, "accounting-cdr-events");
     }
 
     @Incoming("accounting-cdr-events-mirror")
-    @Blocking
     @Acknowledgment(Acknowledgment.Strategy.PRE_PROCESSING)
     public Uni<Void> consumeCdrMirror(Message<AccountingEvent> message) {
         return processMessage(message, "accounting-cdr-events-mirror");
@@ -45,47 +42,37 @@ public class AccountingKafkaConsumer {
 
         AccountingEvent event = message.getPayload();
 
-        try {
-            LOG.infof(
-                    "Received event from [%s]: %s",
-                    channel,
-                    event.getEventId());
+        LOG.infof("Received event from [%s]: %s", channel, event.getEventId());
 
-            processEvent(event);
-
-            LOG.infof(
-                    "Event processed successfully from [%s]: %s",
-                    channel,
-                    event.getEventId());
-
-            return Uni.createFrom().voidItem();
-
-        } catch (Exception e) {
-
-            LOG.errorf(
-                    e,
-                    "Error processing event %s from [%s]",
-                    event.getEventId(),
-                    channel);
-
-            // if retry needed, throw exception instead
-            return Uni.createFrom().voidItem();
-        }
+        return Uni.createFrom().deferred(() -> processEvent(event))
+                .invoke(() -> LOG.infof(
+                        "Event processed successfully from [%s]: %s",
+                        channel,
+                        event.getEventId()))
+                .onFailure().recoverWithItem(e -> {
+                    LOG.errorf(
+                            (Throwable) e,
+                            "Error processing event %s from [%s]",
+                            event.getEventId(),
+                            channel);
+                    // if retry needed, propagate failure instead
+                    return null;
+                });
     }
 
     /**
      * Event type routing
      */
-    private void processEvent(AccountingEvent event) {
+    private Uni<Void> processEvent(AccountingEvent event) {
 
         String eventType = event.getEventType();
 
         if (eventType == null) {
             handleInvalidEventType(event);
-            return;
+            return Uni.createFrom().voidItem();
         }
 
-        switch (eventType.toUpperCase()) {
+        return switch (eventType.toUpperCase()) {
 
             case "ACCOUNTING_START" ->
                     sessionService.processStartEvent(event);
@@ -103,13 +90,11 @@ public class AccountingKafkaConsumer {
                     sessionService.processCoaResponseEvent(event);
 
             default -> {
-                LOG.warnf(
-                        "Unknown event type: %s",
-                        eventType);
-
+                LOG.warnf("Unknown event type: %s", eventType);
                 handleInvalidEventType(event);
+                yield Uni.createFrom().voidItem();
             }
-        }
+        };
     }
 
     /**

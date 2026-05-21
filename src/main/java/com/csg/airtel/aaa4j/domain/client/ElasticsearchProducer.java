@@ -1,10 +1,11 @@
 package com.csg.airtel.aaa4j.domain.client;
 
-import co.elastic.clients.elasticsearch.ElasticsearchClient;
+import co.elastic.clients.elasticsearch.ElasticsearchAsyncClient;
 import co.elastic.clients.json.jackson.JacksonJsonpMapper;
 import co.elastic.clients.transport.rest_client.RestClientTransport;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.inject.Produces;
+import jakarta.inject.Singleton;
 import org.apache.http.HttpHost;
 import org.apache.http.auth.AuthScope;
 import org.apache.http.auth.UsernamePasswordCredentials;
@@ -31,10 +32,10 @@ public class ElasticsearchProducer {
     String password;
 
     @Produces
-    public ElasticsearchClient createClient() {
+    @Singleton
+    public ElasticsearchAsyncClient createAsyncClient() {
         RestClient restClient;
 
-        // Only use credentials if username is provided
         if (userName != null && !userName.isEmpty()) {
             BasicCredentialsProvider credProvider = new BasicCredentialsProvider();
             credProvider.setCredentials(
@@ -48,13 +49,12 @@ public class ElasticsearchProducer {
                     httpClientBuilder.setDefaultCredentialsProvider(credProvider)
             ).build();
         } else {
-            // No authentication for local Elasticsearch
             restClient = RestClient.builder(
                     new HttpHost(serverHost, serverPort, protocol)
             ).build();
         }
 
         RestClientTransport transport = new RestClientTransport(restClient, new JacksonJsonpMapper());
-        return new ElasticsearchClient(transport);
+        return new ElasticsearchAsyncClient(transport);
     }
 }

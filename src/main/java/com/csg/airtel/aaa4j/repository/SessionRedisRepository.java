@@ -1,9 +1,10 @@
 package com.csg.airtel.aaa4j.repository;
 
 import com.csg.airtel.aaa4j.domain.model.connectionhistory.Session;
-import io.quarkus.redis.datasource.RedisDataSource;
-import io.quarkus.redis.datasource.keys.KeyCommands;
-import io.quarkus.redis.datasource.value.ValueCommands;
+import io.quarkus.redis.datasource.ReactiveRedisDataSource;
+import io.quarkus.redis.datasource.keys.ReactiveKeyCommands;
+import io.quarkus.redis.datasource.value.ReactiveValueCommands;
+import io.smallrye.mutiny.Uni;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
@@ -18,85 +19,63 @@ public class SessionRedisRepository {
     private static final Duration SESSION_TTL = Duration.ofHours(24);
     private static final String SESSION_KEY_PREFIX = "cdr::";
 
-    private final ValueCommands<String, Session> sessionCommands;
-    private final KeyCommands<String> keyCommands;
+    private final ReactiveValueCommands<String, Session> sessionCommands;
+    private final ReactiveKeyCommands<String> keyCommands;
 
     @Inject
-    public SessionRedisRepository(RedisDataSource redisDataSource) {
+    public SessionRedisRepository(ReactiveRedisDataSource redisDataSource) {
         this.sessionCommands = redisDataSource.value(Session.class);
         this.keyCommands = redisDataSource.key(String.class);
     }
 
-    /**
-     * Save or update a session in Redis
-     */
-    public void save(Session session, String uniqueSessionId) {
-        try {
-            String key = buildKey(uniqueSessionId);
-            sessionCommands.set(key, session);
-            keyCommands.expire(key, SESSION_TTL);
-            LOG.infof("Session saved to Redis: %s", session.getSessionId());
-        } catch (Exception e) {
-            LOG.errorf(e, "Error saving session to Redis: %s", session.getSessionId());
-            throw new RuntimeException("Failed to save session to Redis", e);
-        }
+    public Uni<Void> save(Session session, String uniqueSessionId) {
+        String key = buildKey(uniqueSessionId);
+        return sessionCommands.set(key, session)
+                .chain(() -> keyCommands.expire(key, SESSION_TTL))
+                .replaceWithVoid()
+                .invoke(() -> LOG.infof("Session saved to Redis: %s", session.getSessionId()))
+                .onFailure().invoke(e ->
+                        LOG.errorf(e, "Error saving session to Redis: %s", session.getSessionId()));
     }
 
-    /**
-     * Find a session by sessionId
-     */
-    public Optional<Session> findBySessionId(String sessionId) {
-        try {
-            String key = buildKey(sessionId);
-            Session session = sessionCommands.get(key);
-            if (session != null) {
-                LOG.debugf("Session found in Redis: %s", sessionId);
-                return Optional.of(session);
-            }
-            LOG.debugf("Session not found in Redis: %s", sessionId);
-            return Optional.empty();
-        } catch (Exception e) {
-            LOG.errorf(e, "Error retrieving session from Redis: %s", sessionId);
-            return Optional.empty();
-        }
+    public Uni<Optional<Session>> findBySessionId(String sessionId) {
+        String key = buildKey(sessionId);
+        return sessionCommands.get(key)
+                .map(Optional::ofNullable)
+                .onFailure().recoverWithItem(e -> {
+                    LOG.errorf((Throwable) e, "Error retrieving session from Redis: %s", sessionId);
+                    return Optional.empty();
+                });
     }
 
-    /**
-     * Delete a session from Redis
-     */
-    public void delete(String sessionId) {
-        try {
-            String key = buildKey(sessionId);
-            sessionCommands.getdel(key);
-            LOG.infof("Session deleted from Redis: %s", sessionId);
-        } catch (Exception e) {
-            LOG.errorf(e, "Error deleting session from Redis: %s", sessionId);
-        }
+    public Uni<Void> delete(String sessionId) {
+        String key = buildKey(sessionId);
+        return sessionCommands.getdel(key)
+                .replaceWithVoid()
+                .invoke(() -> LOG.infof("Session deleted from Redis: %s", sessionId))
+                .onFailure().recoverWithItem(e -> {
+                    LOG.errorf((Throwable) e, "Error deleting session from Redis: %s", sessionId);
+                    return null;
+                });
     }
 
-    /**
-     * Check if a session exists
-     */
-    public boolean exists(String sessionId) {
-        try {
-            return keyCommands.exists(buildKey(sessionId));
-        } catch (Exception e) {
-            LOG.errorf(e, "Error checking session existence: %s", sessionId);
-            return false;
-        }
+    public Uni<Boolean> exists(String sessionId) {
+        return keyCommands.exists(buildKey(sessionId))
+                .onFailure().recoverWithItem(e -> {
+                    LOG.errorf((Throwable) e, "Error checking session existence: %s", sessionId);
+                    return false;
+                });
     }
 
-    /**
-     * Update session TTL
-     */
-    public void refreshTTL(String sessionId) {
-        try {
-            String key = buildKey(sessionId);
-            keyCommands.expire(key, SESSION_TTL);
-            LOG.debugf("Session TTL refreshed: %s", sessionId);
-        } catch (Exception e) {
-            LOG.errorf(e, "Error refreshing session TTL: %s", sessionId);
-        }
+    public Uni<Void> refreshTTL(String sessionId) {
+        String key = buildKey(sessionId);
+        return keyCommands.expire(key, SESSION_TTL)
+                .replaceWithVoid()
+                .invoke(() -> LOG.debugf("Session TTL refreshed: %s", sessionId))
+                .onFailure().recoverWithItem(e -> {
+                    LOG.errorf((Throwable) e, "Error refreshing session TTL: %s", sessionId);
+                    return null;
+                });
     }
 
     private String buildKey(String sessionId) {
