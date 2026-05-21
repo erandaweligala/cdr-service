@@ -11,28 +11,49 @@ import java.util.concurrent.ExecutionException;
 @ApplicationScoped
 public class ServiceExceptionHandler {
 
-    public BaseException serviceLayerExceptionHandler(Exception ex) throws BaseException {
-        if (ex instanceof ExecutionException || ex instanceof CompletionException) {
-            if (ex.getCause() instanceof BaseException) {
-                BaseException bxe = (BaseException) ex.getCause();
-                throw new BaseException(ex.getMessage(), bxe.getReason(), bxe.getHttpStatus(), bxe.getResultCode());
-            } else
-                throw new BaseException(ex.getMessage(), ResponseCodeEnum.EXCEPTION_SERVICE_LAYER.description(), HttpStatus.SC_INTERNAL_SERVER_ERROR, ResponseCodeEnum.EXCEPTION_SERVICE_LAYER.code());
-        } else
-            throw new BaseException(ex.getMessage(), ResponseCodeEnum.EXCEPTION_SERVICE_LAYER.description(), HttpStatus.SC_INTERNAL_SERVER_ERROR, ResponseCodeEnum.EXCEPTION_SERVICE_LAYER.code());
+    public BaseException serviceLayerExceptionHandler(Throwable ex) {
+        Throwable cause = (ex instanceof CompletionException || ex instanceof ExecutionException)
+                ? ex.getCause() : ex;
+
+        if (cause instanceof BaseException be) {
+            return be;
+        }
+
+        if (cause instanceof ElasticsearchException) {
+            return elasticsearchExceptionHandler(cause);
+        }
+
+        return new BaseException(
+                cause != null ? cause.getMessage() : ex.getMessage(),
+                ResponseCodeEnum.EXCEPTION_SERVICE_LAYER.description(),
+                HttpStatus.SC_INTERNAL_SERVER_ERROR,
+                ResponseCodeEnum.EXCEPTION_SERVICE_LAYER.code()
+        );
     }
 
-    public BaseException elasticsearchExceptionHandler(Exception ex) throws BaseException {
-        if (ex instanceof ElasticsearchException)
-            throw new BaseException(ex.getMessage(), ResponseCodeEnum.EXCEPTION_ELASTIC_CLIENT.description(), HttpStatus.SC_SERVICE_UNAVAILABLE, ResponseCodeEnum.EXCEPTION_ELASTIC_CLIENT.code());
+    public BaseException elasticsearchExceptionHandler(Throwable ex) {
+        Throwable cause = (ex instanceof CompletionException || ex instanceof ExecutionException)
+                ? ex.getCause() : ex;
 
-        throw new BaseException(
-                ex.getMessage(),
+        if (cause instanceof BaseException be) {
+            return be;
+        }
+
+        if (cause instanceof ElasticsearchException) {
+            return new BaseException(
+                    cause.getMessage(),
+                    ResponseCodeEnum.EXCEPTION_ELASTIC_CLIENT.description(),
+                    HttpStatus.SC_SERVICE_UNAVAILABLE,
+                    ResponseCodeEnum.EXCEPTION_ELASTIC_CLIENT.code()
+            );
+        }
+
+        return new BaseException(
+                cause != null ? cause.getMessage() : ex.getMessage(),
                 ResponseCodeEnum.EXCEPTION_ELASTIC_CLIENT.description(),
                 HttpStatus.SC_INTERNAL_SERVER_ERROR,
                 ResponseCodeEnum.EXCEPTION_ELASTIC_CLIENT.code()
         );
-
     }
 
 }

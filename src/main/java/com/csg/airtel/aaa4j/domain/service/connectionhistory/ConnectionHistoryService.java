@@ -1,10 +1,8 @@
 package com.csg.airtel.aaa4j.domain.service.connectionhistory;
 
-import co.elastic.clients.elasticsearch.ElasticsearchClient;
+import co.elastic.clients.elasticsearch.ElasticsearchAsyncClient;
 import co.elastic.clients.elasticsearch._types.ElasticsearchException;
 import co.elastic.clients.elasticsearch._types.SortOrder;
-import co.elastic.clients.elasticsearch.core.GetResponse;
-import co.elastic.clients.elasticsearch.core.SearchResponse;
 import co.elastic.clients.elasticsearch.core.search.Hit;
 import co.elastic.clients.json.JsonData;
 import com.csg.airtel.aaa4j.domain.model.BaseResponse;
@@ -14,13 +12,13 @@ import com.csg.airtel.aaa4j.domain.model.connectionhistory.SessionInstanceInfo;
 import com.csg.airtel.aaa4j.domain.util.ResponseCodeEnum;
 import com.csg.airtel.aaa4j.domain.util.exceptions.BaseException;
 import com.csg.airtel.aaa4j.domain.util.exceptions.ServiceExceptionHandler;
+import io.smallrye.mutiny.Uni;
 import jakarta.enterprise.context.ApplicationScoped;
 import org.apache.http.HttpStatus;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.io.IOException;
 import java.time.*;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
@@ -35,15 +33,15 @@ public class ConnectionHistoryService {
     @ConfigProperty(name = "sessions-data")
     String sessionsIndex;
 
-    private final ElasticsearchClient client;
+    private final ElasticsearchAsyncClient client;
     private final ServiceExceptionHandler handler;
 
-    public ConnectionHistoryService(ElasticsearchClient client, ServiceExceptionHandler handler) {
+    public ConnectionHistoryService(ElasticsearchAsyncClient client, ServiceExceptionHandler handler) {
         this.client = client;
         this.handler = handler;
     }
 
-    public BaseResponse<Session> fetchSessionDetails(
+    public Uni<BaseResponse<Session>> fetchSessionDetails(
             String username,
             String connectionStatus,
             String sessionId,
@@ -52,170 +50,148 @@ public class ConnectionHistoryService {
             String endDate,
             int pageSize,
             int page
-    ) throws BaseException {
+    ) {
+        log.info("Start fetching session info list.");
 
-        try {
-            log.info("Start fetching session info list.");
+        String startTime = startDate != null ? startDate : LocalDate.now().minusDays(7).toString();
+        String endTime = endDate != null ? endDate : LocalDate.now().toString();
 
-            String startTime = startDate != null ? startDate : LocalDate.now().minusDays(7).toString();
-            String endTime = endDate != null ? endDate : LocalDate.now().toString();
+        List<String> targetIndices = getTargetIndices(startTime, endTime);
 
-            List<String> targetIndices = getTargetIndices(startTime, endTime);  // no null check needed
+        Instant endInstant = LocalDateTime.parse(endTime)
+                .toLocalDate()
+                .atTime(23, 59, 59)
+                .atZone(ZoneId.of("UTC"))
+                .toInstant();
 
-            Instant endInstant = LocalDateTime.parse(endTime)
-                    .toLocalDate()
-                    .atTime(23, 59, 59)
-                    .atZone(ZoneId.of("UTC"))
-                    .toInstant();
+        return Uni.createFrom().completionStage(() ->
+                        client.search(s -> s
+                                        .index(targetIndices)
+                                        .from((pageSize * page) - pageSize)
+                                        .size(pageSize)
+                                        .sort(srt -> srt
+                                                .field(f -> f.field("startTime").order(SortOrder.Desc))
+                                        )
+                                        .query(q -> q.bool(b -> {
 
-            SearchResponse<Session> response = client.search(s -> s
-                            .index(targetIndices)          // was: sessionsIndex (wildcard)
-                            .from((pageSize * page) - pageSize)
-                            .size(pageSize)
-                            .sort(srt -> srt
-                                    .field(f -> f.field("startTime").order(SortOrder.Desc))
-                            )
-                            .query(q -> q.bool(b -> {
+                                            if (username != null && !username.isEmpty())
+                                                b.must(query -> query.term(term -> term
+                                                        .field("userName.keyword")
+                                                        .value(username)));
 
-                                if (username != null && !username.isEmpty())
-                                    b.must(query -> query.term(term -> term
-                                            .field("userName.keyword")
-                                            .value(username)));
+                                            if (connectionStatus != null && !connectionStatus.isEmpty())
+                                                b.must(query -> query.term(term -> term
+                                                        .field("connectionStatus.keyword")
+                                                        .value(connectionStatus)));
 
-                                if (connectionStatus != null && !connectionStatus.isEmpty())
-                                    b.must(query -> query.term(term -> term
-                                            .field("connectionStatus.keyword")
-                                            .value(connectionStatus)));
+                                            if (sessionId != null && !sessionId.isEmpty())
+                                                b.must(query -> query.term(term -> term
+                                                        .field("sessionId.keyword")
+                                                        .value(sessionId)));
 
-                                if (sessionId != null && !sessionId.isEmpty())
-                                    b.must(query -> query.term(term -> term
-                                            .field("sessionId.keyword")
-                                            .value(sessionId)));
+                                            if (groupId != null && !groupId.isEmpty())
+                                                b.must(query -> query.term(term -> term
+                                                        .field("groupId.keyword")
+                                                        .value(groupId)));
 
-                                if (groupId != null && !groupId.isEmpty())
-                                    b.must(query -> query.term(term -> term
-                                            .field("groupId.keyword")
-                                            .value(groupId)));
+                                            b.filter(filterQ -> filterQ.range(rangeQ -> {
+                                                rangeQ.field("startTime");
+                                                rangeQ.gte(JsonData.of(parseDate(startTime).toEpochMilli()));
+                                                rangeQ.lte(JsonData.of(endInstant.toEpochMilli()));
+                                                return rangeQ;
+                                            }));
 
-                                // startTime and endTime always present now
-                                b.filter(filterQ -> filterQ.range(rangeQ -> {
-                                    rangeQ.field("startTime");
-                                    rangeQ.gte(JsonData.of(parseDate(startTime).toEpochMilli()));
-                                    rangeQ.lte(JsonData.of(endInstant.toEpochMilli()));
-                                    return rangeQ;
-                                }));
+                                            return b;
+                                        })),
+                                Session.class
+                        ))
+                .map(response -> {
+                    List<Session> data = new ArrayList<>();
+                    if (!response.hits().hits().isEmpty()) {
+                        data = response.hits().hits().stream()
+                                .map(Hit::source)
+                                .toList();
+                    }
 
-                                return b;
-                            })),
-                    Session.class
-            );
+                    assert response.hits().total() != null;
+                    PageDetails pageDetails = new PageDetails(
+                            response.hits().total().value(),
+                            page,
+                            data.size()
+                    );
 
-            List<Session> data = new ArrayList<>();
-            if (!response.hits().hits().isEmpty()) {
-                data = response.hits().hits().stream()
-                        .map(Hit::source)
-                        .toList();
-            }
+                    log.info("Session data fetched successfully. Total records: {}", pageDetails.getTotalRecords());
 
-            assert response.hits().total() != null;
-            PageDetails pageDetails = new PageDetails(
-                    response.hits().total().value(),
-                    page,
-                    data.size()
-            );
-
-            log.info("Session data fetched successfully. Total records: {}", pageDetails.getTotalRecords());
-
-            return BaseResponse.success(
-                    ResponseCodeEnum.SUCCESSFUL.description(),
-                    data,
-                    pageDetails
-            );
-
-        } catch (ElasticsearchException ex) {
-            log.error("Elasticsearch error: ", ex);
-            logElasticsearchError(ex);
-            throw handler.elasticsearchExceptionHandler(ex);
-
-        } catch (IOException ex) {
-            log.error("IO error communicating with Elasticsearch: ", ex);
-            throw handler.elasticsearchExceptionHandler(ex);
-
-        } catch (BaseException ex) {
-            throw ex;
-
-        } catch (Exception ex) {
-            log.error("Unexpected error: ", ex);
-            throw handler.serviceLayerExceptionHandler(ex);
-        }
+                    return BaseResponse.success(
+                            ResponseCodeEnum.SUCCESSFUL.description(),
+                            data,
+                            pageDetails
+                    );
+                })
+                .onFailure().transform(this::mapFailure);
     }
 
-    public BaseResponse<SessionInstanceInfo> fetchSessionInstances(String sessionId) throws BaseException {
+    public Uni<BaseResponse<SessionInstanceInfo>> fetchSessionInstances(String sessionId) {
+        log.info("Fetching session instances for sessionId: {}", sessionId);
 
-        try {
-            log.info("Fetching session instances for sessionId: {}", sessionId);
+        return Uni.createFrom().completionStage(() ->
+                        client.get(g -> g
+                                        .index(getSearchIndex())
+                                        .id(sessionId),
+                                Session.class
+                        ))
+                .map(response -> {
+                    log.debug("Elasticsearch GET response: found={}, source={}",
+                            response.found(), response.source());
 
-            // Use GET API instead of SEARCH API for ID lookup
-            GetResponse<Session> response = client.get(g -> g
-                            .index(getSearchIndex())
-                            .id(sessionId),
-                    Session.class
-            );
+                    if (!response.found() || response.source() == null) {
+                        throw new BaseException(
+                                ResponseCodeEnum.SESSION_INSTANCE_NOT_FOUND.description(),
+                                ResponseCodeEnum.SESSION_INSTANCE_NOT_FOUND.description(),
+                                HttpStatus.SC_NOT_FOUND,
+                                ResponseCodeEnum.SESSION_INSTANCE_NOT_FOUND.code()
+                        );
+                    }
 
-            log.debug("Elasticsearch GET response: found={}, source={}",
-                    response.found(), response.source());
+                    Session session = response.source();
+                    List<SessionInstanceInfo> data = (session.getSessionInstances() != null)
+                            ? session.getSessionInstances()
+                            : Collections.emptyList();
 
-            if (!response.found() || response.source() == null) {
-                throw new BaseException(
-                        ResponseCodeEnum.SESSION_INSTANCE_NOT_FOUND.description(),
-                        ResponseCodeEnum.SESSION_INSTANCE_NOT_FOUND.description(),
-                        HttpStatus.SC_NOT_FOUND,
-                        ResponseCodeEnum.SESSION_INSTANCE_NOT_FOUND.code()
-                );
-            }
+                    log.info("Refined list of session instances: {} records", data.size());
 
-            // Get session instances
-            Session session = response.source();
-            List<SessionInstanceInfo> data = (session.getSessionInstances() != null)
-                    ? session.getSessionInstances()
-                    : Collections.emptyList();
-
-            log.info("Refined list of session instances: {} records", data.size());
-
-            return BaseResponse.success(
-                    ResponseCodeEnum.SUCCESSFUL.description(),
-                    data,
-                    null
-            );
-
-        } catch (ElasticsearchException ex) {
-            log.error("Elasticsearch error: ", ex);
-            logElasticsearchError(ex);
-            throw handler.elasticsearchExceptionHandler(ex);
-
-        } catch (IOException ex) {
-            log.error("IO error: ", ex);
-            throw handler.elasticsearchExceptionHandler(ex);
-
-        } catch (BaseException ex) {
-            throw ex;
-
-        } catch (Exception ex) {
-            log.error("Unexpected error: ", ex);
-            throw handler.serviceLayerExceptionHandler(ex);
-        }
+                    return BaseResponse.success(
+                            ResponseCodeEnum.SUCCESSFUL.description(),
+                            data,
+                            null
+                    );
+                })
+                .onFailure().transform(this::mapFailure);
     }
 
-    /**
-     * Check if index exists
-     */
-    private boolean indexExists() {
-        try {
-            return client.indices().exists(e -> e.index(getSearchIndex())).value();
-        } catch (Exception e) {
-            log.error("Error checking if index exists for pattern: {}", getSearchIndex(), e);
-            return false;
+    private Throwable mapFailure(Throwable ex) {
+        Throwable cause = (ex.getCause() != null
+                && (ex instanceof java.util.concurrent.CompletionException
+                || ex instanceof java.util.concurrent.ExecutionException))
+                ? ex.getCause() : ex;
+
+        if (cause instanceof BaseException be) {
+            return be;
         }
+
+        if (cause instanceof ElasticsearchException ese) {
+            log.error("Elasticsearch error: ", ese);
+            logElasticsearchError(ese);
+            return handler.elasticsearchExceptionHandler(ese);
+        }
+
+        if (cause instanceof java.io.IOException) {
+            log.error("IO error communicating with Elasticsearch: ", cause);
+            return handler.elasticsearchExceptionHandler(cause);
+        }
+
+        log.error("Unexpected error: ", cause);
+        return handler.serviceLayerExceptionHandler(cause);
     }
 
     /**
@@ -236,7 +212,6 @@ public class ConnectionHistoryService {
                 );
             }
 
-            // Log the failed shard info if available
             if (e.error().metadata() != null) {
                 log.error("Metadata: {}", e.error().metadata());
             }
@@ -244,7 +219,7 @@ public class ConnectionHistoryService {
         log.error("=====================================");
     }
 
-    public Instant parseDate(String date){
+    public Instant parseDate(String date) {
         return LocalDateTime
                 .parse(date)
                 .atZone(ZoneId.of("UTC"))
@@ -257,7 +232,7 @@ public class ConnectionHistoryService {
 
     private List<String> getTargetIndices(String startTime, String endTime) {
         LocalDate from = parseDate(startTime).atZone(ZoneOffset.UTC).toLocalDate();
-        LocalDate to   = parseDate(endTime).atZone(ZoneOffset.UTC).toLocalDate();
+        LocalDate to = parseDate(endTime).atZone(ZoneOffset.UTC).toLocalDate();
 
         List<String> indices = new ArrayList<>();
         LocalDate current = from;

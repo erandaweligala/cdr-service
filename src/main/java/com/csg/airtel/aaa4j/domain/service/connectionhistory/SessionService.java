@@ -5,6 +5,7 @@ import com.csg.airtel.aaa4j.domain.util.ResponseCodeEnum;
 import com.csg.airtel.aaa4j.domain.util.exceptions.BaseException;
 import com.csg.airtel.aaa4j.repository.SessionRedisRepository;
 
+import io.smallrye.mutiny.Uni;
 import jakarta.enterprise.context.ApplicationScoped;
 import org.apache.http.HttpStatus;
 import org.jboss.logging.Logger;
@@ -12,7 +13,6 @@ import org.jboss.logging.Logger;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Date;
-import java.util.Optional;
 
 @ApplicationScoped
 public class SessionService {
@@ -27,24 +27,32 @@ public class SessionService {
         this.elasticsearchService = elasticsearchService;
     }
 
-
-
     /**
      * Process ACCOUNTING_START event
      */
-    public void processStartEvent(AccountingEvent event) {
+    public Uni<Void> processStartEvent(AccountingEvent event) {
         LOG.infof("Processing START event: %s", event.getEventId());
-        String uniqueSessionId = getUniqueIdFromSessionCDR(event.getPayload().getSession());
-        Session session = getOrCreateSession(uniqueSessionId, event);
 
-        if (redisRepository.findBySessionId(uniqueSessionId).isPresent()) {
-            LOG.warnf("Session already exists for START event: %s, updating existing session", session.getSessionId());
-            updateSessionFromStart(session, event);
-        }
-        addInstanceInfoAndSave(session, event, true,uniqueSessionId);
-        elasticsearchService.indexSession(session, uniqueSessionId, session.getIndexName());
-
-        LOG.infof("START event processed successfully: %s", session.getSessionId());
+        return Uni.createFrom().item(() -> getUniqueIdFromSessionCDR(event.getPayload().getSession()))
+                .flatMap(uniqueSessionId -> redisRepository.findBySessionId(uniqueSessionId)
+                        .flatMap(existing -> {
+                            Session session;
+                            if (existing.isPresent()) {
+                                session = existing.get();
+                                LOG.warnf("Session already exists for START event: %s, updating existing session",
+                                        session.getSessionId());
+                                updateSessionFromStart(session, event);
+                            } else {
+                                LOG.warnf("Session not found for %s event: %s, creating new session",
+                                        event.getEventType(), uniqueSessionId);
+                                session = createSession(event, uniqueSessionId);
+                            }
+                            return addInstanceInfoAndSave(session, event, true, uniqueSessionId)
+                                    .chain(() -> elasticsearchService.indexSession(
+                                            session, uniqueSessionId, session.getIndexName()))
+                                    .invoke(() -> LOG.infof("START event processed successfully: %s",
+                                            session.getSessionId()));
+                        }));
     }
 
     private String getUniqueIdFromSessionCDR(SessionCdr session) {
@@ -62,101 +70,101 @@ public class SessionService {
     /**
      * Process ACCOUNTING_INTERIM event
      */
-    public void processInterimEvent(AccountingEvent event) {
+    public Uni<Void> processInterimEvent(AccountingEvent event) {
         LOG.infof("Processing INTERIM event: %s", event.getEventId());
 
-        String uniqueSessionId = getUniqueIdFromSessionCDR(event.getPayload().getSession());
-        Session session = getOrCreateSession(uniqueSessionId, event);
-
-        updateSessionFromInterim(session, event);
-        addInstanceInfoAndSave(session, event, true, uniqueSessionId);
-        elasticsearchService.indexSession(session, uniqueSessionId, session.getIndexName());
-
-        LOG.infof("INTERIM event processed successfully: %s", uniqueSessionId);
+        return Uni.createFrom().item(() -> getUniqueIdFromSessionCDR(event.getPayload().getSession()))
+                .flatMap(uniqueSessionId -> getOrCreateSession(uniqueSessionId, event)
+                        .flatMap(session -> {
+                            updateSessionFromInterim(session, event);
+                            return addInstanceInfoAndSave(session, event, true, uniqueSessionId)
+                                    .chain(() -> elasticsearchService.indexSession(
+                                            session, uniqueSessionId, session.getIndexName()))
+                                    .invoke(() -> LOG.infof("INTERIM event processed successfully: %s",
+                                            uniqueSessionId));
+                        }));
     }
 
     /**
      * Process ACCOUNTING_STOP event
      */
-    public void processStopEvent(AccountingEvent event) {
+    public Uni<Void> processStopEvent(AccountingEvent event) {
         LOG.infof("Processing STOP event: %s", event.getEventId());
 
-        String uniqueSessionId = getUniqueIdFromSessionCDR(event.getPayload().getSession());
-        Session session = getOrCreateSession(uniqueSessionId, event);
-
-        updateSessionFromStop(session, event);
-        addInstanceInfoAndSave(session, event, false, uniqueSessionId);
-        elasticsearchService.indexSession(session, uniqueSessionId, session.getIndexName());
-
-//        // Send to AAA Kafka
-//        aaaKafkaProducer.sendSession(session);
-
-        redisRepository.delete(uniqueSessionId);
-
-        LOG.infof("STOP event processed successfully: %s", uniqueSessionId);
+        return Uni.createFrom().item(() -> getUniqueIdFromSessionCDR(event.getPayload().getSession()))
+                .flatMap(uniqueSessionId -> getOrCreateSession(uniqueSessionId, event)
+                        .flatMap(session -> {
+                            updateSessionFromStop(session, event);
+                            return addInstanceInfoAndSave(session, event, false, uniqueSessionId)
+                                    .chain(() -> elasticsearchService.indexSession(
+                                            session, uniqueSessionId, session.getIndexName()))
+                                    .chain(() -> redisRepository.delete(uniqueSessionId))
+                                    .invoke(() -> LOG.infof("STOP event processed successfully: %s",
+                                            uniqueSessionId));
+                        }));
     }
 
     /**
      * Process COA_REQUEST event
      */
-    public void processCoaRequestEvent(AccountingEvent event) {
+    public Uni<Void> processCoaRequestEvent(AccountingEvent event) {
         LOG.infof("Processing COA REQUEST event: %s", event.getEventId());
 
-        String uniqueSessionId = getUniqueIdFromSessionCDR(event.getPayload().getSession());
-        Session session = getOrCreateSession(uniqueSessionId, event);
-
-        updateSessionFromCoa(session, event);
-        addInstanceInfoAndSave(session, event, false, uniqueSessionId);
-        elasticsearchService.indexSession(session, uniqueSessionId, session.getIndexName());
-
-//        // Send to AAA Kafka
-//        aaaKafkaProducer.sendSession(session);
-
-        LOG.infof("COA REQUEST event processed successfully: %s", uniqueSessionId);
+        return Uni.createFrom().item(() -> getUniqueIdFromSessionCDR(event.getPayload().getSession()))
+                .flatMap(uniqueSessionId -> getOrCreateSession(uniqueSessionId, event)
+                        .flatMap(session -> {
+                            updateSessionFromCoa(session, event);
+                            return addInstanceInfoAndSave(session, event, false, uniqueSessionId)
+                                    .chain(() -> elasticsearchService.indexSession(
+                                            session, uniqueSessionId, session.getIndexName()))
+                                    .invoke(() -> LOG.infof("COA REQUEST event processed successfully: %s",
+                                            uniqueSessionId));
+                        }));
     }
 
     /**
      * Process COA_RESPONSE event
      */
-    public void processCoaResponseEvent(AccountingEvent event) {
+    public Uni<Void> processCoaResponseEvent(AccountingEvent event) {
         LOG.infof("Processing COA RESPONSE event: %s", event.getEventId());
 
-        String uniqueSessionId = getUniqueIdFromSessionCDR(event.getPayload().getSession());
-        Session session = getOrCreateSession(uniqueSessionId, event);
+        return Uni.createFrom().item(() -> getUniqueIdFromSessionCDR(event.getPayload().getSession()))
+                .flatMap(uniqueSessionId -> getOrCreateSession(uniqueSessionId, event)
+                        .flatMap(session -> {
+                            updateSessionFromCoa(session, event);
+                            COA coa = event.getPayload().getCoa();
+                            session.setConnectionStatus(getSessionStatusFromCoaResponse(coa));
 
-        updateSessionFromCoa(session, event);
-        COA coa = event.getPayload().getCoa();
-        session.setConnectionStatus(getSessionStatusFromCoaResponse(coa));
+                            Uni<Void> tail = addInstanceInfoAndSave(session, event, false, uniqueSessionId);
 
-        addInstanceInfoAndSave(session, event, false, uniqueSessionId);
+                            if (coa.getStatus().equalsIgnoreCase("NAK")) {
+                                tail = tail
+                                        .chain(() -> elasticsearchService.indexSession(
+                                                session, uniqueSessionId, session.getIndexName()))
+                                        .chain(() -> redisRepository.delete(uniqueSessionId));
+                            }
 
-        if (coa.getStatus().equalsIgnoreCase("NAK")){
-            elasticsearchService.indexSession(session, uniqueSessionId, session.getIndexName());
-            redisRepository.delete(uniqueSessionId);
-        }
-
-//        // Send to AAA Kafka
-//        aaaKafkaProducer.sendSession(session);
-
-        LOG.infof("COA RESPONSE event processed successfully: %s", uniqueSessionId);
+                            return tail.invoke(() -> LOG.infof("COA RESPONSE event processed successfully: %s",
+                                    uniqueSessionId));
+                        }));
     }
 
     private SessionStatus getSessionStatusFromCoaResponse(COA coa) {
-        if (coa!=null && coa.getStatus()!=null){
+        if (coa != null && coa.getStatus() != null) {
             return switch (coa.getStatus().toUpperCase()) {
                 case "ACK" -> SessionStatus.TERMINATION_REQUESTED;
                 case "NAK" -> SessionStatus.TERMINATED;
                 default -> {
                     LOG.errorf("Unknown COA status: %s", coa.getStatus());
                     throw new BaseException(
-                            "Invalid COA Status: "+coa.getStatus(),
+                            "Invalid COA Status: " + coa.getStatus(),
                             ResponseCodeEnum.EXCEPTION_SERVICE_LAYER.description(),
                             HttpStatus.SC_BAD_REQUEST,
                             ResponseCodeEnum.EXCEPTION_SERVICE_LAYER.code()
                     );
                 }
             };
-        }else {
+        } else {
             LOG.errorf("Incomplete COA response received : %s", coa);
             throw new BaseException(
                     "Incomplete COA Data",
@@ -170,16 +178,16 @@ public class SessionService {
     /**
      * Get existing session or create new one
      */
-    private Session getOrCreateSession(String sessionId, AccountingEvent event) {
-        Optional<Session> existingSession = redisRepository.findBySessionId(sessionId);
-
-        if (existingSession.isPresent()) {
-            return existingSession.get();
-        } else {
-            LOG.warnf("Session not found for %s event: %s, creating new session",
-                    event.getEventType(), sessionId);
-            return createSession(event,sessionId);
-        }
+    private Uni<Session> getOrCreateSession(String sessionId, AccountingEvent event) {
+        return redisRepository.findBySessionId(sessionId)
+                .map(existing -> {
+                    if (existing.isPresent()) {
+                        return existing.get();
+                    }
+                    LOG.warnf("Session not found for %s event: %s, creating new session",
+                            event.getEventType(), sessionId);
+                    return createSession(event, sessionId);
+                });
     }
 
     /**
@@ -212,13 +220,14 @@ public class SessionService {
     /**
      * Add instance info and save session
      */
-    private void addInstanceInfoAndSave(Session session, AccountingEvent event, boolean saveToRedis, String uniqueSessionId) {
+    private Uni<Void> addInstanceInfoAndSave(Session session, AccountingEvent event, boolean saveToRedis, String uniqueSessionId) {
         SessionInstanceInfo instanceInfo = createInstanceInfo(event);
         session.getSessionInstances().add(instanceInfo);
 
         if (saveToRedis) {
-            redisRepository.save(session,uniqueSessionId);
+            return redisRepository.save(session, uniqueSessionId);
         }
+        return Uni.createFrom().voidItem();
     }
 
     /**
@@ -255,9 +264,9 @@ public class SessionService {
         session.setEndTime(sessionEndTime != null ? Date.from(sessionEndTime) : Date.from(event.getEventTimestamp()));
         session.setUpdatedTime(Date.from(event.getEventTimestamp()));
         session.setUsage(getUsageFromPayload(payload));
-        if (session.getConnectionStatus().equals(SessionStatus.TERMINATION_REQUESTED)){
+        if (session.getConnectionStatus().equals(SessionStatus.TERMINATION_REQUESTED)) {
             session.setConnectionStatus(SessionStatus.TERMINATED);
-        }else {
+        } else {
             session.setConnectionStatus(SessionStatus.COMPLETED);
         }
     }
@@ -268,11 +277,11 @@ public class SessionService {
     private void updateSessionFromCoa(Session session, AccountingEvent event) {
         session.setUpdatedTime(Date.from(event.getEventTimestamp()));
         session.setUsage(getUsageFromPayload(event.getPayload()));
-        if (event.getEventType().equalsIgnoreCase(String.valueOf(EventTypes.COA_RESPONSE))){
+        if (event.getEventType().equalsIgnoreCase(String.valueOf(EventTypes.COA_RESPONSE))) {
             Instant sessionEndTime = event.getPayload().getSession().getSessionStopTime();
             session.setEndTime(sessionEndTime != null ? Date.from(sessionEndTime) : Date.from(event.getEventTimestamp()));
             session.setConnectionStatus(getSessionStatusFromCoaResponse(event.getPayload().getCoa()));
-        }else {
+        } else {
             session.setConnectionStatus(SessionStatus.TERMINATION_REQUESTED);
         }
     }
@@ -311,8 +320,8 @@ public class SessionService {
             info.setUsage(accounting.getSessionUsage());
             info.setServiceId(accounting.getServiceId());
             info.setBucketId(accounting.getBucketId());
-        }else {
-            LOG.infof("No accounting details to be recorded for the event Id: %s",event.getEventId());
+        } else {
+            LOG.infof("No accounting details to be recorded for the event Id: %s", event.getEventId());
         }
         return info;
     }
