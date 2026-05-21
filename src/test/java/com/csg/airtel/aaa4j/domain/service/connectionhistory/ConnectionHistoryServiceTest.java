@@ -1,20 +1,21 @@
 package com.csg.airtel.aaa4j.domain.service.connectionhistory;
 
-import co.elastic.clients.elasticsearch.ElasticsearchClient;
+import co.elastic.clients.elasticsearch.ElasticsearchAsyncClient;
 import co.elastic.clients.elasticsearch._types.ElasticsearchException;
 import co.elastic.clients.elasticsearch._types.ErrorCause;
 import co.elastic.clients.elasticsearch.core.SearchResponse;
-import co.elastic.clients.elasticsearch.core.GetResponse;
 import co.elastic.clients.elasticsearch.core.search.Hit;
 import co.elastic.clients.elasticsearch.core.search.HitsMetadata;
 import co.elastic.clients.elasticsearch.core.search.TotalHits;
 import co.elastic.clients.json.JsonData;
+import co.elastic.clients.transport.endpoints.BooleanResponse;
 import com.csg.airtel.aaa4j.domain.model.BaseResponse;
 import com.csg.airtel.aaa4j.domain.model.connectionhistory.Session;
 import com.csg.airtel.aaa4j.domain.model.connectionhistory.SessionInstanceInfo;
 import com.csg.airtel.aaa4j.domain.model.connectionhistory.SessionStatus;
 import com.csg.airtel.aaa4j.domain.util.exceptions.BaseException;
 import com.csg.airtel.aaa4j.domain.util.exceptions.ServiceExceptionHandler;
+import io.smallrye.mutiny.helpers.test.UniAssertSubscriber;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -26,6 +27,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import java.io.IOException;
 import java.time.Instant;
 import java.util.*;
+import java.util.concurrent.CompletableFuture;
 import java.util.function.Function;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -37,7 +39,7 @@ import static org.mockito.Mockito.*;
 class ConnectionHistoryServiceTest {
 
     @Mock(answer = Answers.RETURNS_DEEP_STUBS)
-    private ElasticsearchClient client;
+    private ElasticsearchAsyncClient client;
 
     @Mock
     private ServiceExceptionHandler handler;
@@ -45,11 +47,10 @@ class ConnectionHistoryServiceTest {
     @InjectMocks
     private ConnectionHistoryService service;
 
-    // Mandatory date params used across tests
     private static final String START_TIME = "2024-01-01T00:00:00";
     private static final String END_TIME   = "2024-01-31T23:59:59";
 
-    private String sessionsIndex = "test-sessions-index";
+    private final String sessionsIndex = "test-sessions-index";
 
     @BeforeEach
     void setUp() throws Exception {
@@ -60,16 +61,16 @@ class ConnectionHistoryServiceTest {
     // ============ fetchSessionDetails Success Tests ============
 
     @Test
-    void testFetchSessionDetails_Success_AllParameters() throws Exception {
+    void testFetchSessionDetails_Success_AllParameters() {
+        stubAllIndicesExist(true);
         Session session = createTestSession("session-1");
         SearchResponse<Session> mockResponse = createMockSearchResponse(Collections.singletonList(session), 1L);
-
-        when(client.search(any(Function.class), eq(Session.class))).thenReturn(mockResponse);
+        stubSearch(CompletableFuture.completedFuture(mockResponse));
 
         BaseResponse<Session> result = service.fetchSessionDetails(
                 "user@test.com", "ACTIVE", "session-123", "group-001",
                 START_TIME, END_TIME, 10, 1
-        );
+        ).await().indefinitely();
 
         assertNotNull(result);
         assertEquals(1, result.getData().size());
@@ -77,32 +78,31 @@ class ConnectionHistoryServiceTest {
     }
 
     @Test
-    void testFetchSessionDetails_Success_OnlyMandatoryDates() throws Exception {
-        // All optional filters null, only mandatory dates provided
+    void testFetchSessionDetails_Success_OnlyMandatoryDates() {
+        stubAllIndicesExist(true);
         Session session = createTestSession("session-1");
         SearchResponse<Session> mockResponse = createMockSearchResponse(Collections.singletonList(session), 1L);
-
-        when(client.search(any(Function.class), eq(Session.class))).thenReturn(mockResponse);
+        stubSearch(CompletableFuture.completedFuture(mockResponse));
 
         BaseResponse<Session> result = service.fetchSessionDetails(
                 null, null, null, null,
                 START_TIME, END_TIME, 10, 1
-        );
+        ).await().indefinitely();
 
         assertNotNull(result);
         assertEquals(1, result.getData().size());
     }
 
     @Test
-    void testFetchSessionDetails_Success_EmptyResults() throws Exception {
+    void testFetchSessionDetails_Success_EmptyResults() {
+        stubAllIndicesExist(true);
         SearchResponse<Session> mockResponse = createMockSearchResponse(Collections.emptyList(), 0L);
-
-        when(client.search(any(Function.class), eq(Session.class))).thenReturn(mockResponse);
+        stubSearch(CompletableFuture.completedFuture(mockResponse));
 
         BaseResponse<Session> result = service.fetchSessionDetails(
                 null, null, null, null,
                 START_TIME, END_TIME, 10, 1
-        );
+        ).await().indefinitely();
 
         assertNotNull(result);
         assertTrue(result.getData().isEmpty());
@@ -110,177 +110,194 @@ class ConnectionHistoryServiceTest {
     }
 
     @Test
-    void testFetchSessionDetails_Success_WithUsername() throws Exception {
+    void testFetchSessionDetails_Success_WithUsername() {
+        stubAllIndicesExist(true);
         Session session = createTestSession("session-1");
         SearchResponse<Session> mockResponse = createMockSearchResponse(Collections.singletonList(session), 1L);
-
-        when(client.search(any(Function.class), eq(Session.class))).thenReturn(mockResponse);
+        stubSearch(CompletableFuture.completedFuture(mockResponse));
 
         BaseResponse<Session> result = service.fetchSessionDetails(
                 "user@test.com", null, null, null,
                 START_TIME, END_TIME, 10, 1
-        );
+        ).await().indefinitely();
 
-        assertNotNull(result);
         assertEquals(1, result.getData().size());
     }
 
     @Test
-    void testFetchSessionDetails_Success_WithConnectionStatus() throws Exception {
+    void testFetchSessionDetails_Success_WithConnectionStatus() {
+        stubAllIndicesExist(true);
         Session session = createTestSession("session-1");
         SearchResponse<Session> mockResponse = createMockSearchResponse(Collections.singletonList(session), 1L);
-
-        when(client.search(any(Function.class), eq(Session.class))).thenReturn(mockResponse);
+        stubSearch(CompletableFuture.completedFuture(mockResponse));
 
         BaseResponse<Session> result = service.fetchSessionDetails(
                 null, "ACTIVE", null, null,
                 START_TIME, END_TIME, 10, 1
-        );
+        ).await().indefinitely();
 
-        assertNotNull(result);
         assertEquals(1, result.getData().size());
     }
 
     @Test
-    void testFetchSessionDetails_Success_WithSessionId() throws Exception {
+    void testFetchSessionDetails_Success_WithSessionId() {
+        stubAllIndicesExist(true);
         Session session = createTestSession("session-1");
         SearchResponse<Session> mockResponse = createMockSearchResponse(Collections.singletonList(session), 1L);
-
-        when(client.search(any(Function.class), eq(Session.class))).thenReturn(mockResponse);
+        stubSearch(CompletableFuture.completedFuture(mockResponse));
 
         BaseResponse<Session> result = service.fetchSessionDetails(
                 null, null, "session-123", null,
                 START_TIME, END_TIME, 10, 1
-        );
+        ).await().indefinitely();
 
-        assertNotNull(result);
         assertEquals(1, result.getData().size());
     }
 
     @Test
-    void testFetchSessionDetails_Success_WithGroupId() throws Exception {
+    void testFetchSessionDetails_Success_WithGroupId() {
+        stubAllIndicesExist(true);
         Session session = createTestSession("session-1");
         SearchResponse<Session> mockResponse = createMockSearchResponse(Collections.singletonList(session), 1L);
-
-        when(client.search(any(Function.class), eq(Session.class))).thenReturn(mockResponse);
+        stubSearch(CompletableFuture.completedFuture(mockResponse));
 
         BaseResponse<Session> result = service.fetchSessionDetails(
                 null, null, null, "group-001",
                 START_TIME, END_TIME, 10, 1
-        );
+        ).await().indefinitely();
 
-        assertNotNull(result);
         assertEquals(1, result.getData().size());
     }
 
     @Test
-    void testFetchSessionDetails_Success_MultiDayRange() throws Exception {
-        // Verifies getTargetIndices generates correct list across multiple days
+    void testFetchSessionDetails_Success_MultiDayRange() {
+        stubAllIndicesExist(true);
         Session session = createTestSession("session-1");
         SearchResponse<Session> mockResponse = createMockSearchResponse(Collections.singletonList(session), 1L);
-
-        when(client.search(any(Function.class), eq(Session.class))).thenReturn(mockResponse);
+        stubSearch(CompletableFuture.completedFuture(mockResponse));
 
         BaseResponse<Session> result = service.fetchSessionDetails(
                 null, null, null, null,
-                "2024-01-01T00:00:00", "2024-01-03T23:59:59", // 3-day range
+                "2024-01-01T00:00:00", "2024-01-03T23:59:59",
                 10, 1
-        );
+        ).await().indefinitely();
 
-        assertNotNull(result);
         assertEquals(1, result.getData().size());
     }
 
     @Test
-    void testFetchSessionDetails_Success_SameDayRange() throws Exception {
-        // Start and end on the same day — should target exactly one index
+    void testFetchSessionDetails_Success_SameDayRange() {
+        stubAllIndicesExist(true);
         Session session = createTestSession("session-1");
         SearchResponse<Session> mockResponse = createMockSearchResponse(Collections.singletonList(session), 1L);
-
-        when(client.search(any(Function.class), eq(Session.class))).thenReturn(mockResponse);
+        stubSearch(CompletableFuture.completedFuture(mockResponse));
 
         BaseResponse<Session> result = service.fetchSessionDetails(
                 null, null, null, null,
                 "2024-01-15T00:00:00", "2024-01-15T23:59:59",
                 10, 1
-        );
+        ).await().indefinitely();
+
+        assertEquals(1, result.getData().size());
+    }
+
+    @Test
+    void testFetchSessionDetails_NoIndicesExist_ReturnsEmpty() {
+        stubAllIndicesExist(false);
+
+        BaseResponse<Session> result = service.fetchSessionDetails(
+                null, null, null, null,
+                START_TIME, END_TIME, 10, 1
+        ).await().indefinitely();
 
         assertNotNull(result);
-        assertEquals(1, result.getData().size());
+        assertTrue(result.getData().isEmpty());
+        assertEquals(0L, result.getPageDetails().getTotalRecords());
+        verify(client, never()).search(any(Function.class), eq(Session.class));
     }
 
     // ============ fetchSessionDetails Error Tests ============
 
-    // REMOVED: testFetchSessionDetails_IndexNotFound       — indexExists() check no longer exists
-    // REMOVED: testFetchSessionDetails_IndexCheckException — indexExists() check no longer exists
-    // REMOVED: testFetchSessionDetails_Success_WithStartTimeOnly — startTime alone is no longer valid (both mandatory)
-    // REMOVED: testFetchSessionDetails_Success_WithEndTimeOnly   — endTime alone is no longer valid (both mandatory)
-
     @Test
-    void testFetchSessionDetails_ElasticsearchException() throws Exception {
+    void testFetchSessionDetails_ElasticsearchException() {
+        stubAllIndicesExist(true);
         ElasticsearchException esException = createElasticsearchException();
         BaseException handledException = new BaseException("ES Error", "ES_ERROR", 503, "ES_001");
 
-        when(client.search(any(Function.class), eq(Session.class))).thenThrow(esException);
-        when(handler.elasticsearchExceptionHandler(any(ElasticsearchException.class))).thenReturn(handledException);
+        stubSearch(CompletableFuture.failedFuture(esException));
+        when(handler.elasticsearchExceptionHandler(any(Throwable.class))).thenReturn(handledException);
 
-        BaseException exception = assertThrows(BaseException.class, () ->
-                service.fetchSessionDetails(null, null, null, null, START_TIME, END_TIME, 10, 1)
-        );
+        Throwable failure = service.fetchSessionDetails(
+                null, null, null, null, START_TIME, END_TIME, 10, 1
+        ).subscribe().withSubscriber(UniAssertSubscriber.create())
+                .awaitFailure()
+                .getFailure();
 
-        assertEquals("ES Error", exception.getMessage());
-        verify(handler).elasticsearchExceptionHandler(any(ElasticsearchException.class));
+        assertInstanceOf(BaseException.class, failure);
+        assertEquals("ES Error", failure.getMessage());
+        verify(handler).elasticsearchExceptionHandler(any(Throwable.class));
     }
 
     @Test
-    void testFetchSessionDetails_IOException() throws Exception {
+    void testFetchSessionDetails_IOException() {
+        stubAllIndicesExist(true);
         IOException ioException = new IOException("Network error");
         BaseException handledException = new BaseException("IO Error", "IO_ERROR", 500, "IO_001");
 
-        when(client.search(any(Function.class), eq(Session.class))).thenThrow(ioException);
-        when(handler.elasticsearchExceptionHandler(any(IOException.class))).thenReturn(handledException);
+        stubSearch(CompletableFuture.failedFuture(ioException));
+        when(handler.elasticsearchExceptionHandler(any(Throwable.class))).thenReturn(handledException);
 
-        BaseException exception = assertThrows(BaseException.class, () ->
-                service.fetchSessionDetails(null, null, null, null, START_TIME, END_TIME, 10, 1)
-        );
+        Throwable failure = service.fetchSessionDetails(
+                null, null, null, null, START_TIME, END_TIME, 10, 1
+        ).subscribe().withSubscriber(UniAssertSubscriber.create())
+                .awaitFailure()
+                .getFailure();
 
-        assertEquals("IO Error", exception.getMessage());
+        assertInstanceOf(BaseException.class, failure);
+        assertEquals("IO Error", failure.getMessage());
     }
 
     @Test
-    void testFetchSessionDetails_BaseException_Rethrown() throws Exception {
+    void testFetchSessionDetails_BaseException_Rethrown() {
+        stubAllIndicesExist(true);
         BaseException baseException = new BaseException("Custom Error", "CUSTOM", 400, "C001");
 
-        when(client.search(any(Function.class), eq(Session.class))).thenThrow(baseException);
+        stubSearch(CompletableFuture.failedFuture(baseException));
 
-        BaseException exception = assertThrows(BaseException.class, () ->
-                service.fetchSessionDetails(null, null, null, null, START_TIME, END_TIME, 10, 1)
-        );
+        Throwable failure = service.fetchSessionDetails(
+                null, null, null, null, START_TIME, END_TIME, 10, 1
+        ).subscribe().withSubscriber(UniAssertSubscriber.create())
+                .awaitFailure()
+                .getFailure();
 
-        assertEquals("Custom Error", exception.getMessage());
+        assertInstanceOf(BaseException.class, failure);
+        assertEquals("Custom Error", failure.getMessage());
         verify(handler, never()).elasticsearchExceptionHandler(any());
     }
 
     @Test
-    void testFetchSessionDetails_UnexpectedException() throws Exception {
+    void testFetchSessionDetails_UnexpectedException() {
+        stubAllIndicesExist(true);
         RuntimeException unexpectedException = new RuntimeException("Unexpected");
         BaseException handledException = new BaseException("Service Error", "SERVICE_ERROR", 500, "S001");
 
-        when(client.search(any(Function.class), eq(Session.class))).thenThrow(unexpectedException);
-        when(handler.serviceLayerExceptionHandler(any(RuntimeException.class))).thenReturn(handledException);
+        stubSearch(CompletableFuture.failedFuture(unexpectedException));
+        when(handler.serviceLayerExceptionHandler(any(Throwable.class))).thenReturn(handledException);
 
-        BaseException exception = assertThrows(BaseException.class, () ->
-                service.fetchSessionDetails(null, null, null, null, START_TIME, END_TIME, 10, 1)
-        );
+        Throwable failure = service.fetchSessionDetails(
+                null, null, null, null, START_TIME, END_TIME, 10, 1
+        ).subscribe().withSubscriber(UniAssertSubscriber.create())
+                .awaitFailure()
+                .getFailure();
 
-        assertEquals("Service Error", exception.getMessage());
+        assertInstanceOf(BaseException.class, failure);
+        assertEquals("Service Error", failure.getMessage());
     }
 
     // ============ fetchSessionInstances Tests ============
-    // No changes needed here — fetchSessionInstances is unaffected by the rolling index changes
 
     @Test
-    void testFetchSessionInstances_Success_WithInstances() throws Exception {
+    void testFetchSessionInstances_Success_WithInstances() {
         String sessionId = "session-123";
         Session session = createTestSession(sessionId);
 
@@ -290,83 +307,92 @@ class ConnectionHistoryServiceTest {
         instance2.setMessageId("msg-2");
         session.setSessionInstances(Arrays.asList(instance1, instance2));
 
-        GetResponse<Session> mockResponse = createMockGetResponse(session, true);
-        when(client.get(any(Function.class), eq(Session.class))).thenReturn(mockResponse);
+        SearchResponse<Session> mockResponse = createMockSessionHitsOnly(Collections.singletonList(session));
+        stubSearch(CompletableFuture.completedFuture(mockResponse));
 
-        BaseResponse<SessionInstanceInfo> result = service.fetchSessionInstances(sessionId);
+        BaseResponse<SessionInstanceInfo> result =
+                service.fetchSessionInstances(sessionId).await().indefinitely();
 
         assertNotNull(result);
         assertEquals(2, result.getData().size());
     }
 
     @Test
-    void testFetchSessionInstances_Success_NoInstances() throws Exception {
+    void testFetchSessionInstances_Success_NoInstances() {
         String sessionId = "session-123";
         Session session = createTestSession(sessionId);
         session.setSessionInstances(null);
 
-        GetResponse<Session> mockResponse = createMockGetResponse(session, true);
-        when(client.get(any(Function.class), eq(Session.class))).thenReturn(mockResponse);
+        SearchResponse<Session> mockResponse = createMockSessionHitsOnly(Collections.singletonList(session));
+        stubSearch(CompletableFuture.completedFuture(mockResponse));
 
-        BaseResponse<SessionInstanceInfo> result = service.fetchSessionInstances(sessionId);
+        BaseResponse<SessionInstanceInfo> result =
+                service.fetchSessionInstances(sessionId).await().indefinitely();
 
         assertNotNull(result);
         assertTrue(result.getData().isEmpty());
     }
 
     @Test
-    void testFetchSessionInstances_NotFound() throws Exception {
-        GetResponse<Session> mockResponse = createMockGetResponse(null, false);
-        when(client.get(any(Function.class), eq(Session.class))).thenReturn(mockResponse);
+    void testFetchSessionInstances_NotFound() {
+        SearchResponse<Session> mockResponse = createMockSessionHitsOnly(Collections.emptyList());
+        stubSearch(CompletableFuture.completedFuture(mockResponse));
 
-        BaseException exception = assertThrows(BaseException.class, () ->
-                service.fetchSessionInstances("session-123")
-        );
+        Throwable failure = service.fetchSessionInstances("session-123")
+                .subscribe().withSubscriber(UniAssertSubscriber.create())
+                .awaitFailure()
+                .getFailure();
 
+        assertInstanceOf(BaseException.class, failure);
+        BaseException exception = (BaseException) failure;
         assertTrue(exception.getMessage().contains("No session instances found"));
         assertEquals(404, exception.getHttpStatus());
     }
 
     @Test
-    void testFetchSessionInstances_FoundButNullSource() throws Exception {
-        GetResponse<Session> mockResponse = createMockGetResponse(null, true);
-        when(client.get(any(Function.class), eq(Session.class))).thenReturn(mockResponse);
+    void testFetchSessionInstances_FoundButNullSource() {
+        SearchResponse<Session> mockResponse = createMockSessionHitsOnly(Collections.singletonList(null));
+        stubSearch(CompletableFuture.completedFuture(mockResponse));
 
-        BaseException exception = assertThrows(BaseException.class, () ->
-                service.fetchSessionInstances("session-123")
-        );
+        BaseResponse<SessionInstanceInfo> result =
+                service.fetchSessionInstances("session-123").await().indefinitely();
 
-        assertTrue(exception.getMessage().contains("No session instances found"));
+        assertNotNull(result);
+        assertTrue(result.getData().isEmpty());
     }
 
     @Test
-    void testFetchSessionInstances_ElasticsearchException() throws Exception {
+    void testFetchSessionInstances_ElasticsearchException() {
         ElasticsearchException esException = createElasticsearchException();
         BaseException handledException = new BaseException("ES Error", "ES_ERROR", 503, "ES_001");
 
-        when(client.get(any(Function.class), eq(Session.class))).thenThrow(esException);
-        when(handler.elasticsearchExceptionHandler(any(ElasticsearchException.class))).thenReturn(handledException);
+        stubSearch(CompletableFuture.failedFuture(esException));
+        when(handler.elasticsearchExceptionHandler(any(Throwable.class))).thenReturn(handledException);
 
-        BaseException exception = assertThrows(BaseException.class, () ->
-                service.fetchSessionInstances("session-123")
-        );
+        Throwable failure = service.fetchSessionInstances("session-123")
+                .subscribe().withSubscriber(UniAssertSubscriber.create())
+                .awaitFailure()
+                .getFailure();
 
-        assertEquals("ES Error", exception.getMessage());
+        assertInstanceOf(BaseException.class, failure);
+        assertEquals("ES Error", failure.getMessage());
     }
 
     @Test
-    void testFetchSessionInstances_IOException() throws Exception {
+    void testFetchSessionInstances_IOException() {
         IOException ioException = new IOException("Network error");
         BaseException handledException = new BaseException("IO Error", "IO_ERROR", 500, "IO_001");
 
-        when(client.get(any(Function.class), eq(Session.class))).thenThrow(ioException);
-        when(handler.elasticsearchExceptionHandler(any(IOException.class))).thenReturn(handledException);
+        stubSearch(CompletableFuture.failedFuture(ioException));
+        when(handler.elasticsearchExceptionHandler(any(Throwable.class))).thenReturn(handledException);
 
-        BaseException exception = assertThrows(BaseException.class, () ->
-                service.fetchSessionInstances("session-123")
-        );
+        Throwable failure = service.fetchSessionInstances("session-123")
+                .subscribe().withSubscriber(UniAssertSubscriber.create())
+                .awaitFailure()
+                .getFailure();
 
-        assertEquals("IO Error", exception.getMessage());
+        assertInstanceOf(BaseException.class, failure);
+        assertEquals("IO Error", failure.getMessage());
     }
 
     // ============ parseDate Tests ============
@@ -386,48 +412,75 @@ class ConnectionHistoryServiceTest {
     // ============ logElasticsearchError Coverage Tests ============
 
     @Test
-    void testLogElasticsearchError_WithRootCause() throws Exception {
+    void testLogElasticsearchError_WithRootCause() {
+        stubAllIndicesExist(true);
         ElasticsearchException esException = createElasticsearchExceptionWithRootCause();
         BaseException handledException = new BaseException("ES Error", "ES_ERROR", 503, "ES_001");
 
-        when(client.search(any(Function.class), eq(Session.class))).thenThrow(esException);
-        when(handler.elasticsearchExceptionHandler(any(ElasticsearchException.class))).thenReturn(handledException);
+        stubSearch(CompletableFuture.failedFuture(esException));
+        when(handler.elasticsearchExceptionHandler(any(Throwable.class))).thenReturn(handledException);
 
-        assertThrows(BaseException.class, () ->
-                service.fetchSessionDetails(null, null, null, null, START_TIME, END_TIME, 10, 1)
-        );
+        Throwable failure = service.fetchSessionDetails(
+                null, null, null, null, START_TIME, END_TIME, 10, 1
+        ).subscribe().withSubscriber(UniAssertSubscriber.create())
+                .awaitFailure()
+                .getFailure();
+
+        assertInstanceOf(BaseException.class, failure);
     }
 
     @Test
-    void testLogElasticsearchError_WithMetadata() throws Exception {
+    void testLogElasticsearchError_WithMetadata() {
+        stubAllIndicesExist(true);
         ElasticsearchException esException = createElasticsearchExceptionWithMetadata();
         BaseException handledException = new BaseException("ES Error", "ES_ERROR", 503, "ES_001");
 
-        when(client.search(any(Function.class), eq(Session.class))).thenThrow(esException);
-        when(handler.elasticsearchExceptionHandler(any(ElasticsearchException.class))).thenReturn(handledException);
+        stubSearch(CompletableFuture.failedFuture(esException));
+        when(handler.elasticsearchExceptionHandler(any(Throwable.class))).thenReturn(handledException);
 
-        assertThrows(BaseException.class, () ->
-                service.fetchSessionDetails(null, null, null, null, START_TIME, END_TIME, 10, 1)
-        );
+        Throwable failure = service.fetchSessionDetails(
+                null, null, null, null, START_TIME, END_TIME, 10, 1
+        ).subscribe().withSubscriber(UniAssertSubscriber.create())
+                .awaitFailure()
+                .getFailure();
+
+        assertInstanceOf(BaseException.class, failure);
     }
 
     @Test
-    void testLogElasticsearchError_NullError() throws Exception {
+    void testLogElasticsearchError_NullError() {
+        stubAllIndicesExist(true);
         ElasticsearchException esException = mock(ElasticsearchException.class);
         when(esException.status()).thenReturn(500);
         when(esException.error()).thenReturn(null);
 
         BaseException handledException = new BaseException("ES Error", "ES_ERROR", 503, "ES_001");
 
-        when(client.search(any(Function.class), eq(Session.class))).thenThrow(esException);
-        when(handler.elasticsearchExceptionHandler(any(ElasticsearchException.class))).thenReturn(handledException);
+        stubSearch(CompletableFuture.failedFuture(esException));
+        when(handler.elasticsearchExceptionHandler(any(Throwable.class))).thenReturn(handledException);
 
-        assertThrows(BaseException.class, () ->
-                service.fetchSessionDetails(null, null, null, null, START_TIME, END_TIME, 10, 1)
-        );
+        Throwable failure = service.fetchSessionDetails(
+                null, null, null, null, START_TIME, END_TIME, 10, 1
+        ).subscribe().withSubscriber(UniAssertSubscriber.create())
+                .awaitFailure()
+                .getFailure();
+
+        assertInstanceOf(BaseException.class, failure);
     }
 
     // ============ Helper Methods ============
+
+    @SuppressWarnings("unchecked")
+    private void stubSearch(CompletableFuture<SearchResponse<Session>> future) {
+        when(client.search(any(Function.class), eq(Session.class))).thenReturn(future);
+    }
+
+    private void stubAllIndicesExist(boolean exists) {
+        BooleanResponse booleanResponse = mock(BooleanResponse.class);
+        when(booleanResponse.value()).thenReturn(exists);
+        when(client.indices().exists(any(Function.class)))
+                .thenReturn(CompletableFuture.completedFuture(booleanResponse));
+    }
 
     private Session createTestSession(String sessionId) {
         Session session = new Session();
@@ -439,6 +492,23 @@ class ConnectionHistoryServiceTest {
         session.setUsage(1024L);
         session.setSessionInstances(new ArrayList<>());
         return session;
+    }
+
+    @SuppressWarnings("unchecked")
+    private SearchResponse<Session> createMockSessionHitsOnly(List<Session> sessions) {
+        SearchResponse<Session> response = mock(SearchResponse.class);
+        HitsMetadata<Session> hitsMetadata = mock(HitsMetadata.class);
+
+        List<Hit<Session>> hits = new ArrayList<>();
+        for (Session session : sessions) {
+            Hit<Session> hit = mock(Hit.class);
+            when(hit.source()).thenReturn(session);
+            hits.add(hit);
+        }
+
+        when(hitsMetadata.hits()).thenReturn(hits);
+        when(response.hits()).thenReturn(hitsMetadata);
+        return response;
     }
 
     @SuppressWarnings("unchecked")
@@ -459,14 +529,6 @@ class ConnectionHistoryServiceTest {
         when(hitsMetadata.hits()).thenReturn(hits);
         when(response.hits()).thenReturn(hitsMetadata);
 
-        return response;
-    }
-
-    @SuppressWarnings("unchecked")
-    private GetResponse<Session> createMockGetResponse(Session session, boolean found) {
-        GetResponse<Session> response = mock(GetResponse.class);
-        when(response.found()).thenReturn(found);
-        when(response.source()).thenReturn(session);
         return response;
     }
 
