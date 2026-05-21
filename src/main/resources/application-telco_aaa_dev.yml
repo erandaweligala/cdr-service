@@ -48,3 +48,4 @@ mp:
         max.partition.fetch.bytes: 10485760
         receive.buffer.bytes: 65536
         failure-strategy: ignore
+        close-timeout: 30000
