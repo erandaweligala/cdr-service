@@ -1,9 +1,8 @@
 package com.csg.airtel.aaa4j.domain.service.connectionhistory;
 
-import co.elastic.clients.elasticsearch.ElasticsearchClient;
+import co.elastic.clients.elasticsearch.ElasticsearchAsyncClient;
 import co.elastic.clients.elasticsearch._types.ElasticsearchException;
 import co.elastic.clients.elasticsearch._types.SortOrder;
-import co.elastic.clients.elasticsearch.core.GetResponse;
 import co.elastic.clients.elasticsearch.core.SearchResponse;
 import co.elastic.clients.elasticsearch.core.search.Hit;
 import co.elastic.clients.json.JsonData;
@@ -14,6 +13,8 @@ import com.csg.airtel.aaa4j.domain.model.connectionhistory.SessionInstanceInfo;
 import com.csg.airtel.aaa4j.domain.util.ResponseCodeEnum;
 import com.csg.airtel.aaa4j.domain.util.exceptions.BaseException;
 import com.csg.airtel.aaa4j.domain.util.exceptions.ServiceExceptionHandler;
+import io.smallrye.mutiny.Multi;
+import io.smallrye.mutiny.Uni;
 import jakarta.enterprise.context.ApplicationScoped;
 import org.apache.http.HttpStatus;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
@@ -21,12 +22,12 @@ import org.jspecify.annotations.NonNull;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.io.IOException;
 import java.time.*;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Objects;
 
 @ApplicationScoped
 public class ConnectionHistoryService {
@@ -36,15 +37,15 @@ public class ConnectionHistoryService {
     @ConfigProperty(name = "sessions-data")
     String sessionsIndex;
 
-    private final ElasticsearchClient client;
+    private final ElasticsearchAsyncClient client;
     private final ServiceExceptionHandler handler;
 
-    public ConnectionHistoryService(ElasticsearchClient client, ServiceExceptionHandler handler) {
+    public ConnectionHistoryService(ElasticsearchAsyncClient client, ServiceExceptionHandler handler) {
         this.client = client;
         this.handler = handler;
     }
 
-    public BaseResponse<Session> fetchSessionDetails(
+    public Uni<BaseResponse<Session>> fetchSessionDetails(
             String username,
             String connectionStatus,
             String sessionId,
@@ -53,163 +54,144 @@ public class ConnectionHistoryService {
             String endDate,
             int pageSize,
             int page
-    ) throws BaseException {
+    ) {
+        log.info("Start fetching session info list.");
 
-        try {
-            log.info("Start fetching session info list.");
+        String startTime = startDate != null ? startDate : LocalDate.now().minusDays(7).toString();
+        String endTime = endDate != null ? endDate : LocalDate.now().toString();
 
-            String startTime = startDate != null ? startDate : LocalDate.now().minusDays(7).toString();
-            String endTime = endDate != null ? endDate : LocalDate.now().toString();
+        List<String> targetIndices = getTargetIndices(startTime, endTime);
 
-            List<String> targetIndices = getTargetIndices(startTime, endTime);
+        return filterExistingIndices(targetIndices)
+                .flatMap(existingIndices -> {
+                    if (existingIndices.isEmpty()) {
+                        log.warn("No existing indices found in range [{} - {}]. Returning empty result.", startTime, endTime);
+                        return Uni.createFrom().item(BaseResponse.success(
+                                ResponseCodeEnum.SUCCESSFUL.description(),
+                                Collections.<Session>emptyList(),
+                                new PageDetails(0, page, 0)
+                        ));
+                    }
 
-            // ✅ Filter to only indices that actually exist
-            List<String> existingIndices = filterExistingIndices(targetIndices);
+                    Instant endInstant = LocalDateTime.parse(endTime)
+                            .toLocalDate()
+                            .atTime(23, 59, 59)
+                            .atZone(ZoneId.of("UTC"))
+                            .toInstant();
 
-            // ✅ If no indices exist at all, return empty result gracefully
-            if (existingIndices.isEmpty()) {
-                log.warn("No existing indices found in range [{} - {}]. Returning empty result.", startTime, endTime);
-                return BaseResponse.success(
-                        ResponseCodeEnum.SUCCESSFUL.description(),
-                        Collections.emptyList(),
-                        new PageDetails(0, page, 0)
-                );
-            }
+                    return Uni.createFrom().completionStage(() -> client.search(s -> s
+                                            .index(existingIndices)
+                                            .from((pageSize * page) - pageSize)
+                                            .size(pageSize)
+                                            .sort(srt -> srt
+                                                    .field(f -> f.field("startTime").order(SortOrder.Desc))
+                                            )
+                                            .query(q -> q.bool(b -> {
 
-            Instant endInstant = LocalDateTime.parse(endTime)
-                    .toLocalDate()
-                    .atTime(23, 59, 59)
-                    .atZone(ZoneId.of("UTC"))
-                    .toInstant();
+                                                if (username != null && !username.isEmpty())
+                                                    b.must(query -> query.term(term -> term
+                                                            .field("userName.keyword")
+                                                            .value(username)));
 
-            SearchResponse<Session> response = client.search(s -> s
-                            .index(existingIndices)   // ✅ only existing indices
-                            .from((pageSize * page) - pageSize)
-                            .size(pageSize)
-                            .sort(srt -> srt
-                                    .field(f -> f.field("startTime").order(SortOrder.Desc))
-                            )
-                            .query(q -> q.bool(b -> {
+                                                if (connectionStatus != null && !connectionStatus.isEmpty())
+                                                    b.must(query -> query.term(term -> term
+                                                            .field("connectionStatus.keyword")
+                                                            .value(connectionStatus)));
 
-                                if (username != null && !username.isEmpty())
-                                    b.must(query -> query.term(term -> term
-                                            .field("userName.keyword")
-                                            .value(username)));
+                                                if (sessionId != null && !sessionId.isEmpty())
+                                                    b.must(query -> query.term(term -> term
+                                                            .field("sessionId.keyword")
+                                                            .value(sessionId)));
 
-                                if (connectionStatus != null && !connectionStatus.isEmpty())
-                                    b.must(query -> query.term(term -> term
-                                            .field("connectionStatus.keyword")
-                                            .value(connectionStatus)));
+                                                if (groupId != null && !groupId.isEmpty())
+                                                    b.must(query -> query.term(term -> term
+                                                            .field("groupId.keyword")
+                                                            .value(groupId)));
 
-                                if (sessionId != null && !sessionId.isEmpty())
-                                    b.must(query -> query.term(term -> term
-                                            .field("sessionId.keyword")
-                                            .value(sessionId)));
+                                                b.filter(filterQ -> filterQ.range(rangeQ -> {
+                                                    rangeQ.field("startTime");
+                                                    rangeQ.gte(JsonData.of(parseDate(startTime).toEpochMilli()));
+                                                    rangeQ.lte(JsonData.of(endInstant.toEpochMilli()));
+                                                    return rangeQ;
+                                                }));
 
-                                if (groupId != null && !groupId.isEmpty())
-                                    b.must(query -> query.term(term -> term
-                                            .field("groupId.keyword")
-                                            .value(groupId)));
+                                                return b;
+                                            })),
+                                    Session.class
+                            ))
+                            .map(response -> {
+                                List<Session> data = new ArrayList<>();
+                                if (!response.hits().hits().isEmpty()) {
+                                    data = response.hits().hits().stream()
+                                            .map(Hit::source)
+                                            .toList();
+                                }
 
-                                // startTime and endTime always present now
-                                b.filter(filterQ -> filterQ.range(rangeQ -> {
-                                    rangeQ.field("startTime");
-                                    rangeQ.gte(JsonData.of(parseDate(startTime).toEpochMilli()));
-                                    rangeQ.lte(JsonData.of(endInstant.toEpochMilli()));
-                                    return rangeQ;
-                                }));
+                                assert response.hits().total() != null;
+                                PageDetails pageDetails = new PageDetails(
+                                        response.hits().total().value(),
+                                        page,
+                                        data.size()
+                                );
 
-                                return b;
-                            })),
-                    Session.class
-            );
+                                log.info("Session data fetched successfully. Total records: {}", pageDetails.getTotalRecords());
 
-            List<Session> data = new ArrayList<>();
-            if (!response.hits().hits().isEmpty()) {
-                data = response.hits().hits().stream()
-                        .map(Hit::source)
-                        .toList();
-            }
-
-            assert response.hits().total() != null;
-            PageDetails pageDetails = new PageDetails(
-                    response.hits().total().value(),
-                    page,
-                    data.size()
-            );
-
-            log.info("Session data fetched successfully. Total records: {}", pageDetails.getTotalRecords());
-
-            return BaseResponse.success(
-                    ResponseCodeEnum.SUCCESSFUL.description(),
-                    data,
-                    pageDetails
-            );
-
-        } catch (ElasticsearchException ex) {
-            log.error("Elasticsearch error: ", ex);
-            logElasticsearchError(ex);
-            throw handler.elasticsearchExceptionHandler(ex);
-
-        } catch (IOException ex) {
-            log.error("IO error communicating with Elasticsearch: ", ex);
-            throw handler.elasticsearchExceptionHandler(ex);
-
-        } catch (BaseException ex) {
-            throw ex;
-
-        } catch (Exception ex) {
-            log.error("Unexpected error: ", ex);
-            throw handler.serviceLayerExceptionHandler(ex);
-        }
+                                return BaseResponse.success(
+                                        ResponseCodeEnum.SUCCESSFUL.description(),
+                                        data,
+                                        pageDetails
+                                );
+                            });
+                })
+                .onFailure().transform(this::mapFailure);
     }
 
-    public BaseResponse<SessionInstanceInfo> fetchSessionInstances(String sessionId) throws BaseException {
+    public Uni<BaseResponse<SessionInstanceInfo>> fetchSessionInstances(String sessionId) {
+        log.info("Fetching session instances for sessionId: {}", sessionId);
 
-        try {
-            log.info("Fetching session instances for sessionId: {}", sessionId);
+        return Uni.createFrom().completionStage(() -> client.search(s -> s
+                                .index(getSearchIndex())
+                                .allowNoIndices(true)
+                                .ignoreUnavailable(true)
+                                .size(1)
+                                .query(q -> q.term(t -> t
+                                        .field("uniqueId.keyword")
+                                        .value(sessionId)
+                                )),
+                        Session.class
+                ))
+                .map(response -> {
+                    List<SessionInstanceInfo> data = getSessionInstanceInfos(response);
+                    log.info("Refined list of session instances: {} records", data.size());
+                    return BaseResponse.success(
+                            ResponseCodeEnum.SUCCESSFUL.description(),
+                            data,
+                            null
+                    );
+                })
+                .onFailure().transform(this::mapFailure);
+    }
 
-            // ✅ Use SEARCH with wildcard index instead of GET (which requires a specific index).
-            //    This tolerates missing daily indices — Elasticsearch skips them automatically
-            //    when allow_no_indices=true and ignore_unavailable=true.
-            SearchResponse<Session> response = client.search(s -> s
-                            .index(getSearchIndex())               // "sessions-data-*" wildcard
-                            .allowNoIndices(true)
-                            .ignoreUnavailable(true)
-                            .size(1)
-                            .query(q -> q.term(t -> t
-                                    .field("uniqueId.keyword")
-                                    .value(sessionId)
-                            )),
-                    Session.class
-            );
+    private Throwable mapFailure(Throwable ex) {
+        Throwable cause = (ex instanceof java.util.concurrent.CompletionException
+                || ex instanceof java.util.concurrent.ExecutionException)
+                ? (ex.getCause() != null ? ex.getCause() : ex)
+                : ex;
 
-            List<SessionInstanceInfo> data = getSessionInstanceInfos(response);
-
-            log.info("Refined list of session instances: {} records", data.size());
-
-            return BaseResponse.success(
-                    ResponseCodeEnum.SUCCESSFUL.description(),
-                    data,
-                    null
-            );
-
-        } catch (ElasticsearchException ex) {
-            log.error("Elasticsearch error: ", ex);
-            logElasticsearchError(ex);
-            throw handler.elasticsearchExceptionHandler(ex);
-
-        } catch (IOException ex) {
-            log.error("IO error: ", ex);
-            throw handler.elasticsearchExceptionHandler(ex);
-
-        } catch (BaseException ex) {
-            throw ex;
-
-        } catch (Exception ex) {
-            log.error("Unexpected error: ", ex);
-            throw handler.serviceLayerExceptionHandler(ex);
+        if (cause instanceof BaseException be) {
+            return be;
         }
+        if (cause instanceof ElasticsearchException ese) {
+            log.error("Elasticsearch error: ", ese);
+            logElasticsearchError(ese);
+            return handler.elasticsearchExceptionHandler(ese);
+        }
+        if (cause instanceof java.io.IOException) {
+            log.error("IO error communicating with Elasticsearch: ", cause);
+            return handler.elasticsearchExceptionHandler(cause);
+        }
+        log.error("Unexpected error: ", cause);
+        return handler.serviceLayerExceptionHandler(cause);
     }
 
     private static @NonNull List<SessionInstanceInfo> getSessionInstanceInfos(SearchResponse<Session> response) {
@@ -223,15 +205,11 @@ public class ConnectionHistoryService {
         }
 
         Session session = response.hits().hits().get(0).source();
-        List<SessionInstanceInfo> data = (session != null && session.getSessionInstances() != null)
+        return (session != null && session.getSessionInstances() != null)
                 ? session.getSessionInstances()
                 : Collections.emptyList();
-        return data;
     }
 
-    /**
-     * Log detailed Elasticsearch error information
-     */
     private void logElasticsearchError(ElasticsearchException e) {
         log.error("=== Elasticsearch Exception Details ===");
         log.error("Status: {}", e.status());
@@ -247,7 +225,6 @@ public class ConnectionHistoryService {
                 );
             }
 
-            // Log the failed shard info if available
             if (e.error().metadata() != null) {
                 log.error("Metadata: {}", e.error().metadata());
             }
@@ -279,20 +256,25 @@ public class ConnectionHistoryService {
         return indices;
     }
 
-    private List<String> filterExistingIndices(List<String> indices) {
-        List<String> existing = new ArrayList<>();
-        for (String index : indices) {
-            try {
-                boolean exists = client.indices().exists(e -> e.index(index)).value();
-                if (exists) {
-                    existing.add(index);
-                } else {
-                    log.warn("Index does not exist, skipping: {}", index);
-                }
-            } catch (Exception e) {
-                log.warn("Could not check existence of index {}, skipping: {}", index, e.getMessage());
-            }
+    private Uni<List<String>> filterExistingIndices(List<String> indices) {
+        if (indices.isEmpty()) {
+            return Uni.createFrom().item(Collections.emptyList());
         }
-        return existing;
+        return Multi.createFrom().iterable(indices)
+                .onItem().transformToUniAndConcatenate(index ->
+                        Uni.createFrom().completionStage(() -> client.indices().exists(e -> e.index(index)))
+                                .map(resp -> resp.value() ? index : null)
+                                .onFailure().recoverWithItem(err -> {
+                                    log.warn("Could not check existence of index {}, skipping: {}", index, err.getMessage());
+                                    return null;
+                                })
+                                .onItem().invoke(result -> {
+                                    if (result == null) {
+                                        log.warn("Index does not exist, skipping: {}", index);
+                                    }
+                                })
+                )
+                .filter(Objects::nonNull)
+                .collect().asList();
     }
 }
