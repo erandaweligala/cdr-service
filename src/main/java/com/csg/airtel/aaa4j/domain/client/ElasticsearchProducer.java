@@ -34,22 +34,22 @@ public class ElasticsearchProducer {
     @ConfigProperty(name = "elasticsearch.password", defaultValue = "")
     String password;
 
-    @ConfigProperty(name = "elasticsearch.pool.max-conn-total", defaultValue = "400")
+    @ConfigProperty(name = "elasticsearch.pool.max-conn-total", defaultValue = "50")
     int maxConnTotal;
 
-    @ConfigProperty(name = "elasticsearch.pool.max-conn-per-route", defaultValue = "200")
+    @ConfigProperty(name = "elasticsearch.pool.max-conn-per-route", defaultValue = "50")
     int maxConnPerRoute;
 
-    @ConfigProperty(name = "elasticsearch.pool.io-thread-count", defaultValue = "8")
+    @ConfigProperty(name = "elasticsearch.pool.io-thread-count", defaultValue = "2")
     int ioThreadCount;
 
     @ConfigProperty(name = "elasticsearch.pool.connect-timeout-ms", defaultValue = "5000")
     int connectTimeoutMs;
 
-    @ConfigProperty(name = "elasticsearch.pool.socket-timeout-ms", defaultValue = "60000")
+    @ConfigProperty(name = "elasticsearch.pool.socket-timeout-ms", defaultValue = "30000")
     int socketTimeoutMs;
 
-    @ConfigProperty(name = "elasticsearch.pool.connection-request-timeout-ms", defaultValue = "5000")
+    @ConfigProperty(name = "elasticsearch.pool.connection-request-timeout-ms", defaultValue = "2000")
     int connectionRequestTimeoutMs;
 
     @Produces
