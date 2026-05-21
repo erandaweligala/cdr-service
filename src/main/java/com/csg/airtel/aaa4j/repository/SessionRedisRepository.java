@@ -33,7 +33,7 @@ public class SessionRedisRepository {
         return sessionCommands.set(key, session)
                 .chain(() -> keyCommands.expire(key, SESSION_TTL))
                 .replaceWithVoid()
-                .invoke(() -> LOG.infof("Session saved to Redis: %s", session.getSessionId()))
+                .invoke(() -> LOG.debugf("Session saved to Redis: %s", session.getSessionId()))
                 .onFailure().invoke(e ->
                         LOG.errorf(e, "Error saving session to Redis: %s", session.getSessionId()));
     }
@@ -52,7 +52,7 @@ public class SessionRedisRepository {
         String key = buildKey(sessionId);
         return sessionCommands.getdel(key)
                 .replaceWithVoid()
-                .invoke(() -> LOG.infof("Session deleted from Redis: %s", sessionId))
+                .invoke(() -> LOG.debugf("Session deleted from Redis: %s", sessionId))
                 .onFailure().recoverWithItem(e -> {
                     LOG.errorf((Throwable) e, "Error deleting session from Redis: %s", sessionId);
                     return null;

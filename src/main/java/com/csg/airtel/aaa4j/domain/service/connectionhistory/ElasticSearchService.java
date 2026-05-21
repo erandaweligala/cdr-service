@@ -32,7 +32,7 @@ public class ElasticSearchService {
         );
 
         return Uni.createFrom().completionStage(() -> elasticsearchClient.index(request))
-                .invoke(response -> LOG.infof("Session indexed: %s, status: %s, result: %s",
+                .invoke(response -> LOG.debugf("Session indexed: %s, status: %s, result: %s",
                         session.getSessionId(), session.getConnectionStatus(), response.result()))
                 .onFailure().invoke(e ->
                         LOG.errorf((Throwable) e, "Failed to index session: %s", session.getSessionId()))

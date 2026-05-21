@@ -321,7 +321,7 @@ public class SessionService {
             info.setServiceId(accounting.getServiceId());
             info.setBucketId(accounting.getBucketId());
         } else {
-            LOG.infof("No accounting details to be recorded for the event Id: %s", event.getEventId());
+            LOG.warnf("No accounting details to be recorded for the event Id: %s", event.getEventId());
         }
         return info;
     }
