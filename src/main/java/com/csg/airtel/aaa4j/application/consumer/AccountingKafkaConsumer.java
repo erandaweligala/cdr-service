@@ -1,9 +1,12 @@
 package com.csg.airtel.aaa4j.application.consumer;
 
 import com.csg.airtel.aaa4j.domain.model.connectionhistory.AccountingEvent;
+import com.csg.airtel.aaa4j.domain.service.ExceptionMetricsService;
 import com.csg.airtel.aaa4j.domain.service.connectionhistory.SessionService;
 import io.smallrye.mutiny.Uni;
 import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.enterprise.inject.Instance;
+import jakarta.inject.Inject;
 import org.eclipse.microprofile.reactive.messaging.Acknowledgment;
 import org.eclipse.microprofile.reactive.messaging.Incoming;
 import org.eclipse.microprofile.reactive.messaging.Message;
@@ -16,6 +19,9 @@ public class AccountingKafkaConsumer {
             Logger.getLogger(AccountingKafkaConsumer.class);
 
     private final SessionService sessionService;
+
+    @Inject
+    Instance<ExceptionMetricsService> metrics;
 
     public AccountingKafkaConsumer(SessionService sessionService) {
         this.sessionService = sessionService;
@@ -55,6 +61,12 @@ public class AccountingKafkaConsumer {
                             "Error processing event %s from [%s]",
                             event.getEventId(),
                             channel);
+                    if (metrics != null && !metrics.isUnsatisfied()) {
+                        metrics.get().recordException(
+                                (Throwable) e,
+                                ExceptionMetricsService.Layer.PRODUCER,
+                                ExceptionMetricsService.Source.KAFKA);
+                    }
                     // if retry needed, propagate failure instead
                     return null;
                 });

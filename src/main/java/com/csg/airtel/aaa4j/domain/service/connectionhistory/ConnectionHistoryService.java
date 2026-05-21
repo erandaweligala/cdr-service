@@ -10,12 +10,15 @@ import com.csg.airtel.aaa4j.domain.model.BaseResponse;
 import com.csg.airtel.aaa4j.domain.model.PageDetails;
 import com.csg.airtel.aaa4j.domain.model.connectionhistory.Session;
 import com.csg.airtel.aaa4j.domain.model.connectionhistory.SessionInstanceInfo;
+import com.csg.airtel.aaa4j.domain.service.ExceptionMetricsService;
 import com.csg.airtel.aaa4j.domain.util.ResponseCodeEnum;
 import com.csg.airtel.aaa4j.domain.util.exceptions.BaseException;
 import com.csg.airtel.aaa4j.domain.util.exceptions.ServiceExceptionHandler;
 import io.smallrye.mutiny.Multi;
 import io.smallrye.mutiny.Uni;
 import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.enterprise.inject.Instance;
+import jakarta.inject.Inject;
 import org.apache.http.HttpStatus;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jspecify.annotations.NonNull;
@@ -39,6 +42,9 @@ public class ConnectionHistoryService {
 
     private final ElasticsearchAsyncClient client;
     private final ServiceExceptionHandler handler;
+
+    @Inject
+    Instance<ExceptionMetricsService> metrics;
 
     public ConnectionHistoryService(ElasticsearchAsyncClient client, ServiceExceptionHandler handler) {
         this.client = client;
@@ -179,19 +185,32 @@ public class ConnectionHistoryService {
                 : ex;
 
         if (cause instanceof BaseException be) {
+            recordMetric(be, ExceptionMetricsService.Layer.SERVICE, ExceptionMetricsService.Source.INTERNAL);
             return be;
         }
         if (cause instanceof ElasticsearchException ese) {
             log.error("Elasticsearch error: ", ese);
             logElasticsearchError(ese);
+            recordMetric(ese, ExceptionMetricsService.Layer.CLIENT, ExceptionMetricsService.Source.ELASTICSEARCH);
             return handler.elasticsearchExceptionHandler(ese);
         }
         if (cause instanceof java.io.IOException) {
             log.error("IO error communicating with Elasticsearch: ", cause);
+            recordMetric(cause, ExceptionMetricsService.Layer.CLIENT, ExceptionMetricsService.Source.ELASTICSEARCH);
             return handler.elasticsearchExceptionHandler(cause);
         }
         log.error("Unexpected error: ", cause);
+        recordMetric(cause, ExceptionMetricsService.Layer.SERVICE, ExceptionMetricsService.Source.INTERNAL);
         return handler.serviceLayerExceptionHandler(cause);
+    }
+
+    private void recordMetric(Throwable t,
+                              ExceptionMetricsService.Layer layer,
+                              ExceptionMetricsService.Source source) {
+        if (metrics == null || metrics.isUnsatisfied()) {
+            return;
+        }
+        metrics.get().recordException(t, layer, source);
     }
 
     private static @NonNull List<SessionInstanceInfo> getSessionInstanceInfos(SearchResponse<Session> response) {
