@@ -78,9 +78,9 @@ elasticsearch:
   password: "${ES_PASSWORD}"
   # Connection pool sized for ~2000 TPS workload
   pool:
-    max-conn-total: 400
-    max-conn-per-route: 200
-    io-thread-count: 8
+    max-conn-total: 50
+    max-conn-per-route: 50
+    io-thread-count: 2
     connect-timeout-ms: 5000
     socket-timeout-ms: 60000
     connection-request-timeout-ms: 5000
