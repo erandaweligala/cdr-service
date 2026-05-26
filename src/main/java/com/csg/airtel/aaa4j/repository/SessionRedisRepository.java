@@ -1,5 +1,6 @@
 package com.csg.airtel.aaa4j.repository;
 
+import com.csg.airtel.aaa4j.common.LoggingUtil;
 import com.csg.airtel.aaa4j.domain.model.connectionhistory.Session;
 import io.quarkus.redis.datasource.ReactiveRedisDataSource;
 import io.quarkus.redis.datasource.keys.ReactiveKeyCommands;
@@ -33,9 +34,9 @@ public class SessionRedisRepository {
         return sessionCommands.set(key, session)
                 .chain(() -> keyCommands.expire(key, SESSION_TTL))
                 .replaceWithVoid()
-                .invoke(() -> LOG.debugf("Session saved to Redis: %s", session.getSessionId()))
+                .invoke(() -> LoggingUtil.logDebug(LOG, "save", "Session saved to Redis: %s", session.getSessionId()))
                 .onFailure().invoke(e ->
-                        LOG.errorf(e, "Error saving session to Redis: %s", session.getSessionId()));
+                        LoggingUtil.logError(LOG, "save", e, "Error saving session to Redis: %s", session.getSessionId()));
     }
 
     public Uni<Optional<Session>> findBySessionId(String sessionId) {
@@ -43,7 +44,7 @@ public class SessionRedisRepository {
         return sessionCommands.get(key)
                 .map(Optional::ofNullable)
                 .onFailure().recoverWithItem(e -> {
-                    LOG.errorf((Throwable) e, "Error retrieving session from Redis: %s", sessionId);
+                    LoggingUtil.logError(LOG, "findBySessionId", e, "Error retrieving session from Redis: %s", sessionId);
                     return Optional.empty();
                 });
     }
@@ -52,9 +53,9 @@ public class SessionRedisRepository {
         String key = buildKey(sessionId);
         return sessionCommands.getdel(key)
                 .replaceWithVoid()
-                .invoke(() -> LOG.debugf("Session deleted from Redis: %s", sessionId))
+                .invoke(() -> LoggingUtil.logDebug(LOG, "delete", "Session deleted from Redis: %s", sessionId))
                 .onFailure().recoverWithItem(e -> {
-                    LOG.errorf((Throwable) e, "Error deleting session from Redis: %s", sessionId);
+                    LoggingUtil.logError(LOG, "delete", e, "Error deleting session from Redis: %s", sessionId);
                     return null;
                 });
     }
@@ -62,7 +63,7 @@ public class SessionRedisRepository {
     public Uni<Boolean> exists(String sessionId) {
         return keyCommands.exists(buildKey(sessionId))
                 .onFailure().recoverWithItem(e -> {
-                    LOG.errorf((Throwable) e, "Error checking session existence: %s", sessionId);
+                    LoggingUtil.logError(LOG, "exists", e, "Error checking session existence: %s", sessionId);
                     return false;
                 });
     }
@@ -71,9 +72,9 @@ public class SessionRedisRepository {
         String key = buildKey(sessionId);
         return keyCommands.expire(key, SESSION_TTL)
                 .replaceWithVoid()
-                .invoke(() -> LOG.debugf("Session TTL refreshed: %s", sessionId))
+                .invoke(() -> LoggingUtil.logDebug(LOG, "refreshTTL", "Session TTL refreshed: %s", sessionId))
                 .onFailure().recoverWithItem(e -> {
-                    LOG.errorf((Throwable) e, "Error refreshing session TTL: %s", sessionId);
+                    LoggingUtil.logError(LOG, "refreshTTL", e, "Error refreshing session TTL: %s", sessionId);
                     return null;
                 });
     }

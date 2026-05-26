@@ -6,6 +6,7 @@ import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.MultiGauge;
 import io.micrometer.core.instrument.Tag;
 import io.micrometer.core.instrument.Tags;
+import com.csg.airtel.aaa4j.common.LoggingUtil;
 import io.quarkus.scheduler.Scheduled;
 import io.vertx.core.Context;
 import io.vertx.core.Vertx;
@@ -118,7 +119,7 @@ public class ExceptionMetricsService {
 
     @PostConstruct
     void init() {
-        LOG.info("Initializing ExceptionMetricsService");
+        LoggingUtil.logInfo(LOG, "init", "Initializing ExceptionMetricsService");
 
         this.percentageGauge = MultiGauge.builder(METRIC_PERCENTAGE)
                 .description("Percentage of total application exceptions attributable to each root exception type")
@@ -164,7 +165,7 @@ public class ExceptionMetricsService {
 
             incrementCounters(type, layer, src);
         } catch (Exception e) {
-            LOG.warnf("Failed to record exception metric: %s", e.getMessage());
+            LoggingUtil.logWarn(LOG, "recordException", "Failed to record exception metric: %s", e.getMessage());
         }
     }
 
@@ -296,7 +297,7 @@ public class ExceptionMetricsService {
         try {
             evictExpired(System.currentTimeMillis());
         } catch (Exception e) {
-            LOG.warnf("Failed to evict dedup cache entries: %s", e.getMessage());
+            LoggingUtil.logWarn(LOG, "evictDedupCache", "Failed to evict dedup cache entries: %s", e.getMessage());
         }
     }
 
@@ -331,7 +332,7 @@ public class ExceptionMetricsService {
             }
             g.register(rows, true);
         } catch (Exception e) {
-            LOG.warnf("Failed to refresh percentage gauges: %s", e.getMessage());
+            LoggingUtil.logWarn(LOG, "refreshPercentages", "Failed to refresh percentage gauges: %s", e.getMessage());
         }
     }
 
@@ -340,7 +341,7 @@ public class ExceptionMetricsService {
      */
     @Scheduled(cron = "0 0 0 * * ?")
     void resetDailyCounters() {
-        LOG.info("Resetting daily exception counters");
+        LoggingUtil.logInfo(LOG, "resetDailyCounters", "Resetting daily exception counters");
         for (AtomicLong v : dailyRootCounts.values()) {
             v.set(0);
         }

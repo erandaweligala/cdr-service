@@ -1,19 +1,19 @@
 package com.csg.airtel.aaa4j.domain.resource;
 
+import com.csg.airtel.aaa4j.common.LoggingUtil;
 import com.csg.airtel.aaa4j.domain.service.connectionhistory.ConnectionHistoryService;
 import io.smallrye.mutiny.Uni;
 import jakarta.ws.rs.*;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import org.jboss.logging.Logger;
 
 @Path("/api/aaa/admin-console/connection-history")
 @Produces(MediaType.APPLICATION_JSON)
 @Consumes(MediaType.APPLICATION_JSON)
 public class ConnectionHistoryResource {
 
-    private static final Logger log = LoggerFactory.getLogger(ConnectionHistoryResource.class);
+    private static final Logger log = Logger.getLogger(ConnectionHistoryResource.class);
 
     private final ConnectionHistoryService connectionHistoryService;
 
@@ -33,7 +33,7 @@ public class ConnectionHistoryResource {
             @QueryParam("pageSize") @DefaultValue("10") int pageSize,
             @QueryParam("page") @DefaultValue("1") int page
     ) {
-        log.info("Controller Request Received : ConnectionHistoryResource : fetchSessionDetails");
+        LoggingUtil.logInfo(log, "getSessions", "Controller Request Received : ConnectionHistoryResource : fetchSessionDetails");
 
         return connectionHistoryService.fetchSessionDetails(
                         username,
@@ -52,7 +52,7 @@ public class ConnectionHistoryResource {
     @Path("/detail/{sessionId}")
     public Uni<Response> getSessionInstances(@PathParam("sessionId") String sessionId) {
 
-        log.info("Controller Request Received : ConnectionHistoryResource : fetchSessionInstances");
+        LoggingUtil.logInfo(log, "getSessionInstances", "Controller Request Received : ConnectionHistoryResource : fetchSessionInstances");
         return connectionHistoryService.fetchSessionInstances(sessionId)
                 .map(sessionInstances -> Response.ok(sessionInstances).build());
     }
