@@ -49,6 +49,7 @@ public class AccountingKafkaConsumer {
             String channel) {
 
         AccountingEvent event = message.getPayload();
+        setMdcContext(event);
 
         LoggingUtil.logInfo(LOG, "processMessage", "Received event from [%s]: %s", channel, event.getEventId());
 
@@ -70,7 +71,8 @@ public class AccountingKafkaConsumer {
                     }
                     // if retry needed, propagate failure instead
                     return null;
-                });
+                })
+                .eventually(this::clearMdcContext);
     }
 
     /**
@@ -122,9 +124,20 @@ public class AccountingKafkaConsumer {
     }
 
     private void setMdcContext(AccountingEvent event) {
-        MDC.put(LoggingUtil.TRACE_ID,   nvl(event.getEventId(),   "no-event-id"));
-        MDC.put(LoggingUtil.USER_NAME,  nvl(event.getPayload().getUser().getUserName(),  "unknown"));
-        MDC.put(LoggingUtil.SESSION_ID, nvl(event.getPayload().getSession().getSessionId(), "no-session"));
+        MDC.put(LoggingUtil.TRACE_ID, nvl(event.getEventId(), "no-event-id"));
+
+        String userName = "unknown";
+        String sessionId = "no-session";
+        if (event.getPayload() != null) {
+            if (event.getPayload().getUser() != null) {
+                userName = nvl(event.getPayload().getUser().getUserName(), "unknown");
+            }
+            if (event.getPayload().getSession() != null) {
+                sessionId = nvl(event.getPayload().getSession().getSessionId(), "no-session");
+            }
+        }
+        MDC.put(LoggingUtil.USER_NAME, userName);
+        MDC.put(LoggingUtil.SESSION_ID, sessionId);
     }
 
     private String nvl(String value, String fallback) {
