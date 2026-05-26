@@ -57,7 +57,6 @@ public class ExceptionMetricsService {
         RESOURCE("resource"),
         SERVICE("service"),
         CLIENT("client"),
-        RADIUS("radius"),
         PRODUCER("producer");
 
         static final Layer[] VALUES = values();
@@ -80,11 +79,8 @@ public class ExceptionMetricsService {
      * a Kafka or Elasticsearch stall.
      */
     public enum Source {
-        HTTP_COA("http_coa"),
-        HTTP_NAS("http_auth"),
         KAFKA("kafka"),
         ELASTICSEARCH("elasticsearch"),
-        REDIS("redis"),
         INTERNAL("internal"),
         UNKNOWN("unknown");
 
