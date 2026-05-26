@@ -2,6 +2,7 @@ package com.csg.airtel.aaa4j.domain.service.connectionhistory;
 
 import co.elastic.clients.elasticsearch.ElasticsearchAsyncClient;
 import co.elastic.clients.elasticsearch.core.IndexRequest;
+import com.csg.airtel.aaa4j.common.LoggingUtil;
 import com.csg.airtel.aaa4j.domain.model.connectionhistory.Session;
 import com.csg.airtel.aaa4j.domain.service.ExceptionMetricsService;
 import io.smallrye.mutiny.Uni;
@@ -37,10 +38,12 @@ public class ElasticSearchService {
         );
 
         return Uni.createFrom().completionStage(() -> elasticsearchClient.index(request))
-                .invoke(response -> LOG.debugf("Session indexed: %s, status: %s, result: %s",
+                .invoke(response -> LoggingUtil.logDebug(LOG, "indexSession",
+                        "Session indexed: %s, status: %s, result: %s",
                         session.getSessionId(), session.getConnectionStatus(), response.result()))
                 .onFailure().invoke(e -> {
-                    LOG.errorf((Throwable) e, "Failed to index session: %s", session.getSessionId());
+                    LoggingUtil.logError(LOG, "indexSession", e,
+                            "Failed to index session: %s", session.getSessionId());
                     if (metrics != null && !metrics.isUnsatisfied()) {
                         metrics.get().recordException(
                                 (Throwable) e,

@@ -6,6 +6,7 @@ import co.elastic.clients.elasticsearch._types.SortOrder;
 import co.elastic.clients.elasticsearch.core.SearchResponse;
 import co.elastic.clients.elasticsearch.core.search.Hit;
 import co.elastic.clients.json.JsonData;
+import com.csg.airtel.aaa4j.common.LoggingUtil;
 import com.csg.airtel.aaa4j.domain.model.BaseResponse;
 import com.csg.airtel.aaa4j.domain.model.PageDetails;
 import com.csg.airtel.aaa4j.domain.model.connectionhistory.Session;
@@ -21,9 +22,8 @@ import jakarta.enterprise.inject.Instance;
 import jakarta.inject.Inject;
 import org.apache.http.HttpStatus;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
+import org.jboss.logging.Logger;
 import org.jspecify.annotations.NonNull;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 import java.time.*;
 import java.time.format.DateTimeFormatter;
@@ -35,7 +35,7 @@ import java.util.Objects;
 @ApplicationScoped
 public class ConnectionHistoryService {
 
-    private static final Logger log = LoggerFactory.getLogger(ConnectionHistoryService.class);
+    private static final Logger log = Logger.getLogger(ConnectionHistoryService.class);
 
     @ConfigProperty(name = "sessions-data")
     String sessionsIndex;
@@ -61,7 +61,7 @@ public class ConnectionHistoryService {
             int pageSize,
             int page
     ) {
-        log.info("Start fetching session info list.");
+        LoggingUtil.logInfo(log, "fetchSessionDetails", "Start fetching session info list.");
 
         String startTime = startDate != null ? startDate : LocalDate.now().minusDays(7).toString();
         String endTime = endDate != null ? endDate : LocalDate.now().toString();
@@ -71,7 +71,8 @@ public class ConnectionHistoryService {
         return filterExistingIndices(targetIndices)
                 .flatMap(existingIndices -> {
                     if (existingIndices.isEmpty()) {
-                        log.warn("No existing indices found in range [{} - {}]. Returning empty result.", startTime, endTime);
+                        LoggingUtil.logWarn(log, "fetchSessionDetails",
+                                "No existing indices found in range [%s - %s]. Returning empty result.", startTime, endTime);
                         return Uni.createFrom().item(BaseResponse.success(
                                 ResponseCodeEnum.SUCCESSFUL.description(),
                                 Collections.<Session>emptyList(),
@@ -140,7 +141,8 @@ public class ConnectionHistoryService {
                                         data.size()
                                 );
 
-                                log.info("Session data fetched successfully. Total records: {}", pageDetails.getTotalRecords());
+                                LoggingUtil.logInfo(log, "fetchSessionDetails",
+                                        "Session data fetched successfully. Total records: %s", pageDetails.getTotalRecords());
 
                                 return BaseResponse.success(
                                         ResponseCodeEnum.SUCCESSFUL.description(),
@@ -153,7 +155,7 @@ public class ConnectionHistoryService {
     }
 
     public Uni<BaseResponse<SessionInstanceInfo>> fetchSessionInstances(String sessionId) {
-        log.info("Fetching session instances for sessionId: {}", sessionId);
+        LoggingUtil.logInfo(log, "fetchSessionInstances", "Fetching session instances for sessionId: %s", sessionId);
 
         return Uni.createFrom().completionStage(() -> client.search(s -> s
                                 .index(getSearchIndex())
@@ -168,7 +170,8 @@ public class ConnectionHistoryService {
                 ))
                 .map(response -> {
                     List<SessionInstanceInfo> data = getSessionInstanceInfos(response);
-                    log.info("Refined list of session instances: {} records", data.size());
+                    LoggingUtil.logInfo(log, "fetchSessionInstances",
+                            "Refined list of session instances: %s records", data.size());
                     return BaseResponse.success(
                             ResponseCodeEnum.SUCCESSFUL.description(),
                             data,
@@ -189,17 +192,17 @@ public class ConnectionHistoryService {
             return be;
         }
         if (cause instanceof ElasticsearchException ese) {
-            log.error("Elasticsearch error: ", ese);
+            LoggingUtil.logError(log, "mapFailure", ese, "Elasticsearch error: ");
             logElasticsearchError(ese);
             recordMetric(ese, ExceptionMetricsService.Layer.CLIENT, ExceptionMetricsService.Source.ELASTICSEARCH);
             return handler.elasticsearchExceptionHandler(ese);
         }
         if (cause instanceof java.io.IOException) {
-            log.error("IO error communicating with Elasticsearch: ", cause);
+            LoggingUtil.logError(log, "mapFailure", cause, "IO error communicating with Elasticsearch: ");
             recordMetric(cause, ExceptionMetricsService.Layer.CLIENT, ExceptionMetricsService.Source.ELASTICSEARCH);
             return handler.elasticsearchExceptionHandler(cause);
         }
-        log.error("Unexpected error: ", cause);
+        LoggingUtil.logError(log, "mapFailure", cause, "Unexpected error: ");
         recordMetric(cause, ExceptionMetricsService.Layer.SERVICE, ExceptionMetricsService.Source.INTERNAL);
         return handler.serviceLayerExceptionHandler(cause);
     }
@@ -230,25 +233,26 @@ public class ConnectionHistoryService {
     }
 
     private void logElasticsearchError(ElasticsearchException e) {
-        log.error("=== Elasticsearch Exception Details ===");
-        log.error("Status: {}", e.status());
+        LoggingUtil.logError(log, "logElasticsearchError", null, "=== Elasticsearch Exception Details ===");
+        LoggingUtil.logError(log, "logElasticsearchError", null, "Status: %s", e.status());
 
         if (e.error() != null) {
-            log.error("Error type: {}", e.error().type());
-            log.error("Error reason: {}", e.error().reason());
+            LoggingUtil.logError(log, "logElasticsearchError", null, "Error type: %s", e.error().type());
+            LoggingUtil.logError(log, "logElasticsearchError", null, "Error reason: %s", e.error().reason());
 
             if (e.error().rootCause() != null && !e.error().rootCause().isEmpty()) {
-                log.error("Root causes:");
+                LoggingUtil.logError(log, "logElasticsearchError", null, "Root causes:");
                 e.error().rootCause().forEach(cause ->
-                        log.error("  - Type: {}, Reason: {}", cause.type(), cause.reason())
+                        LoggingUtil.logError(log, "logElasticsearchError", null,
+                                "  - Type: %s, Reason: %s", cause.type(), cause.reason())
                 );
             }
 
             if (e.error().metadata() != null) {
-                log.error("Metadata: {}", e.error().metadata());
+                LoggingUtil.logError(log, "logElasticsearchError", null, "Metadata: %s", e.error().metadata());
             }
         }
-        log.error("=====================================");
+        LoggingUtil.logError(log, "logElasticsearchError", null, "=====================================");
     }
 
     public Instant parseDate(String date){
@@ -284,12 +288,14 @@ public class ConnectionHistoryService {
                         Uni.createFrom().completionStage(() -> client.indices().exists(e -> e.index(index)))
                                 .map(resp -> resp.value() ? index : null)
                                 .onFailure().recoverWithItem(err -> {
-                                    log.warn("Could not check existence of index {}, skipping: {}", index, err.getMessage());
+                                    LoggingUtil.logWarn(log, "filterExistingIndices",
+                                            "Could not check existence of index %s, skipping: %s", index, err.getMessage());
                                     return null;
                                 })
                                 .onItem().invoke(result -> {
                                     if (result == null) {
-                                        log.warn("Index does not exist, skipping: {}", index);
+                                        LoggingUtil.logWarn(log, "filterExistingIndices",
+                                                "Index does not exist, skipping: %s", index);
                                     }
                                 })
                 )

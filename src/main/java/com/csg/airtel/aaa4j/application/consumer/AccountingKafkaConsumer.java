@@ -50,16 +50,15 @@ public class AccountingKafkaConsumer {
 
         AccountingEvent event = message.getPayload();
 
-        LOG.infof("Received event from [%s]: %s", channel, event.getEventId());
+        LoggingUtil.logInfo(LOG, "processMessage", "Received event from [%s]: %s", channel, event.getEventId());
 
         return Uni.createFrom().deferred(() -> processEvent(event))
-                .invoke(() -> LOG.infof(
+                .invoke(() -> LoggingUtil.logInfo(LOG, "processMessage",
                         "Event processed successfully from [%s]: %s",
                         channel,
                         event.getEventId()))
                 .onFailure().recoverWithItem(e -> {
-                    LOG.errorf(
-                            (Throwable) e,
+                    LoggingUtil.logError(LOG, "processMessage", e,
                             "Error processing event %s from [%s]",
                             event.getEventId(),
                             channel);
@@ -104,7 +103,7 @@ public class AccountingKafkaConsumer {
                     sessionService.processCoaResponseEvent(event);
 
             default -> {
-                LOG.warnf("Unknown event type: %s", eventType);
+                LoggingUtil.logWarn(LOG, "processEvent", "Unknown event type: %s", eventType);
                 handleInvalidEventType(event);
                 yield Uni.createFrom().voidItem();
             }
@@ -116,7 +115,7 @@ public class AccountingKafkaConsumer {
      */
     private void handleInvalidEventType(AccountingEvent event) {
 
-        LOG.warnf(
+        LoggingUtil.logWarn(LOG, "handleInvalidEventType",
                 "Invalid event type received: %s, eventId: %s",
                 event.getEventType(),
                 event.getEventId());

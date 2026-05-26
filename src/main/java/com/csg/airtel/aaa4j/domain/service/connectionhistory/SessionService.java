@@ -1,5 +1,6 @@
 package com.csg.airtel.aaa4j.domain.service.connectionhistory;
 
+import com.csg.airtel.aaa4j.common.LoggingUtil;
 import com.csg.airtel.aaa4j.domain.model.connectionhistory.*;
 import com.csg.airtel.aaa4j.domain.util.ResponseCodeEnum;
 import com.csg.airtel.aaa4j.domain.util.exceptions.BaseException;
@@ -31,7 +32,7 @@ public class SessionService {
      * Process ACCOUNTING_START event
      */
     public Uni<Void> processStartEvent(AccountingEvent event) {
-        LOG.infof("Processing START event: %s", event.getEventId());
+        LoggingUtil.logInfo(LOG, "processStartEvent", "Processing START event: %s", event.getEventId());
 
         return Uni.createFrom().item(() -> getUniqueIdFromSessionCDR(event.getPayload().getSession()))
                 .flatMap(uniqueSessionId -> redisRepository.findBySessionId(uniqueSessionId)
@@ -39,18 +40,21 @@ public class SessionService {
                             Session session;
                             if (existing.isPresent()) {
                                 session = existing.get();
-                                LOG.warnf("Session already exists for START event: %s, updating existing session",
+                                LoggingUtil.logWarn(LOG, "processStartEvent",
+                                        "Session already exists for START event: %s, updating existing session",
                                         session.getSessionId());
                                 updateSessionFromStart(session, event);
                             } else {
-                                LOG.warnf("Session not found for %s event: %s, creating new session",
+                                LoggingUtil.logWarn(LOG, "processStartEvent",
+                                        "Session not found for %s event: %s, creating new session",
                                         event.getEventType(), uniqueSessionId);
                                 session = createSession(event, uniqueSessionId);
                             }
                             return addInstanceInfoAndSave(session, event, true, uniqueSessionId)
                                     .chain(() -> elasticsearchService.indexSession(
                                             session, uniqueSessionId, session.getIndexName()))
-                                    .invoke(() -> LOG.infof("START event processed successfully: %s",
+                                    .invoke(() -> LoggingUtil.logInfo(LOG, "processStartEvent",
+                                            "START event processed successfully: %s",
                                             session.getSessionId()));
                         }));
     }
@@ -71,7 +75,7 @@ public class SessionService {
      * Process ACCOUNTING_INTERIM event
      */
     public Uni<Void> processInterimEvent(AccountingEvent event) {
-        LOG.infof("Processing INTERIM event: %s", event.getEventId());
+        LoggingUtil.logInfo(LOG, "processInterimEvent", "Processing INTERIM event: %s", event.getEventId());
 
         return Uni.createFrom().item(() -> getUniqueIdFromSessionCDR(event.getPayload().getSession()))
                 .flatMap(uniqueSessionId -> getOrCreateSession(uniqueSessionId, event)
@@ -80,7 +84,8 @@ public class SessionService {
                             return addInstanceInfoAndSave(session, event, true, uniqueSessionId)
                                     .chain(() -> elasticsearchService.indexSession(
                                             session, uniqueSessionId, session.getIndexName()))
-                                    .invoke(() -> LOG.infof("INTERIM event processed successfully: %s",
+                                    .invoke(() -> LoggingUtil.logInfo(LOG, "processInterimEvent",
+                                            "INTERIM event processed successfully: %s",
                                             uniqueSessionId));
                         }));
     }
@@ -89,7 +94,7 @@ public class SessionService {
      * Process ACCOUNTING_STOP event
      */
     public Uni<Void> processStopEvent(AccountingEvent event) {
-        LOG.infof("Processing STOP event: %s", event.getEventId());
+        LoggingUtil.logInfo(LOG, "processStopEvent", "Processing STOP event: %s", event.getEventId());
 
         return Uni.createFrom().item(() -> getUniqueIdFromSessionCDR(event.getPayload().getSession()))
                 .flatMap(uniqueSessionId -> getOrCreateSession(uniqueSessionId, event)
@@ -99,7 +104,8 @@ public class SessionService {
                                     .chain(() -> elasticsearchService.indexSession(
                                             session, uniqueSessionId, session.getIndexName()))
                                     .chain(() -> redisRepository.delete(uniqueSessionId))
-                                    .invoke(() -> LOG.infof("STOP event processed successfully: %s",
+                                    .invoke(() -> LoggingUtil.logInfo(LOG, "processStopEvent",
+                                            "STOP event processed successfully: %s",
                                             uniqueSessionId));
                         }));
     }
@@ -108,7 +114,7 @@ public class SessionService {
      * Process COA_REQUEST event
      */
     public Uni<Void> processCoaRequestEvent(AccountingEvent event) {
-        LOG.infof("Processing COA REQUEST event: %s", event.getEventId());
+        LoggingUtil.logInfo(LOG, "processCoaRequestEvent", "Processing COA REQUEST event: %s", event.getEventId());
 
         return Uni.createFrom().item(() -> getUniqueIdFromSessionCDR(event.getPayload().getSession()))
                 .flatMap(uniqueSessionId -> getOrCreateSession(uniqueSessionId, event)
@@ -117,7 +123,8 @@ public class SessionService {
                             return addInstanceInfoAndSave(session, event, false, uniqueSessionId)
                                     .chain(() -> elasticsearchService.indexSession(
                                             session, uniqueSessionId, session.getIndexName()))
-                                    .invoke(() -> LOG.infof("COA REQUEST event processed successfully: %s",
+                                    .invoke(() -> LoggingUtil.logInfo(LOG, "processCoaRequestEvent",
+                                            "COA REQUEST event processed successfully: %s",
                                             uniqueSessionId));
                         }));
     }
@@ -126,7 +133,7 @@ public class SessionService {
      * Process COA_RESPONSE event
      */
     public Uni<Void> processCoaResponseEvent(AccountingEvent event) {
-        LOG.infof("Processing COA RESPONSE event: %s", event.getEventId());
+        LoggingUtil.logInfo(LOG, "processCoaResponseEvent", "Processing COA RESPONSE event: %s", event.getEventId());
 
         return Uni.createFrom().item(() -> getUniqueIdFromSessionCDR(event.getPayload().getSession()))
                 .flatMap(uniqueSessionId -> getOrCreateSession(uniqueSessionId, event)
@@ -144,7 +151,8 @@ public class SessionService {
                                         .chain(() -> redisRepository.delete(uniqueSessionId));
                             }
 
-                            return tail.invoke(() -> LOG.infof("COA RESPONSE event processed successfully: %s",
+                            return tail.invoke(() -> LoggingUtil.logInfo(LOG, "processCoaResponseEvent",
+                                    "COA RESPONSE event processed successfully: %s",
                                     uniqueSessionId));
                         }));
     }
@@ -155,7 +163,8 @@ public class SessionService {
                 case "ACK" -> SessionStatus.TERMINATION_REQUESTED;
                 case "NAK" -> SessionStatus.TERMINATED;
                 default -> {
-                    LOG.errorf("Unknown COA status: %s", coa.getStatus());
+                    LoggingUtil.logError(LOG, "getSessionStatusFromCoaResponse", null,
+                            "Unknown COA status: %s", coa.getStatus());
                     throw new BaseException(
                             "Invalid COA Status: " + coa.getStatus(),
                             ResponseCodeEnum.EXCEPTION_SERVICE_LAYER.description(),
@@ -165,7 +174,8 @@ public class SessionService {
                 }
             };
         } else {
-            LOG.errorf("Incomplete COA response received : %s", coa);
+            LoggingUtil.logError(LOG, "getSessionStatusFromCoaResponse", null,
+                    "Incomplete COA response received : %s", coa);
             throw new BaseException(
                     "Incomplete COA Data",
                     ResponseCodeEnum.EXCEPTION_SERVICE_LAYER.description(),
@@ -184,7 +194,8 @@ public class SessionService {
                     if (existing.isPresent()) {
                         return existing.get();
                     }
-                    LOG.warnf("Session not found for %s event: %s, creating new session",
+                    LoggingUtil.logWarn(LOG, "getOrCreateSession",
+                            "Session not found for %s event: %s, creating new session",
                             event.getEventType(), sessionId);
                     return createSession(event, sessionId);
                 });
@@ -321,7 +332,8 @@ public class SessionService {
             info.setServiceId(accounting.getServiceId());
             info.setBucketId(accounting.getBucketId());
         } else {
-            LOG.warnf("No accounting details to be recorded for the event Id: %s", event.getEventId());
+            LoggingUtil.logWarn(LOG, "createInstanceInfo",
+                    "No accounting details to be recorded for the event Id: %s", event.getEventId());
         }
         return info;
     }
