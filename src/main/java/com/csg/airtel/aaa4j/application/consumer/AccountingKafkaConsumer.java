@@ -1,5 +1,6 @@
 package com.csg.airtel.aaa4j.application.consumer;
 
+import com.csg.airtel.aaa4j.common.LoggingUtil;
 import com.csg.airtel.aaa4j.domain.model.connectionhistory.AccountingEvent;
 import com.csg.airtel.aaa4j.domain.service.ExceptionMetricsService;
 import com.csg.airtel.aaa4j.domain.service.connectionhistory.SessionService;
@@ -11,6 +12,7 @@ import org.eclipse.microprofile.reactive.messaging.Acknowledgment;
 import org.eclipse.microprofile.reactive.messaging.Incoming;
 import org.eclipse.microprofile.reactive.messaging.Message;
 import org.jboss.logging.Logger;
+import org.slf4j.MDC;
 
 @ApplicationScoped
 public class AccountingKafkaConsumer {
@@ -118,5 +120,20 @@ public class AccountingKafkaConsumer {
                 "Invalid event type received: %s, eventId: %s",
                 event.getEventType(),
                 event.getEventId());
+    }
+
+    private void setMdcContext(AccountingEvent event) {
+        MDC.put(LoggingUtil.TRACE_ID,   nvl(event.getEventId(),   "no-event-id"));
+        MDC.put(LoggingUtil.USER_NAME,  nvl(event.getPayload().getUser().getUserName(),  "unknown"));
+        MDC.put(LoggingUtil.SESSION_ID, nvl(event.getPayload().getSession().getSessionId(), "no-session"));
+    }
+
+    private String nvl(String value, String fallback) {
+        return value != null ? value : fallback;
+    }
+    private void clearMdcContext() {
+        MDC.remove(LoggingUtil.TRACE_ID);
+        MDC.remove(LoggingUtil.USER_NAME);
+        MDC.remove(LoggingUtil.SESSION_ID);
     }
 }
