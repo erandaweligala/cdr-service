@@ -1,9 +1,11 @@
 package com.csg.airtel.aaa4j.domain.service.connectionhistory;
 
 import co.elastic.clients.elasticsearch.ElasticsearchAsyncClient;
-import co.elastic.clients.elasticsearch.core.IndexRequest;
-import co.elastic.clients.elasticsearch.core.IndexResponse;
+import co.elastic.clients.elasticsearch._types.Result;
+import co.elastic.clients.elasticsearch.core.UpdateRequest;
+import co.elastic.clients.elasticsearch.core.UpdateResponse;
 import com.csg.airtel.aaa4j.domain.model.connectionhistory.Session;
+import com.csg.airtel.aaa4j.domain.model.connectionhistory.SessionInstanceInfo;
 import com.csg.airtel.aaa4j.domain.model.connectionhistory.SessionStatus;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -24,6 +26,7 @@ import java.util.concurrent.CompletionException;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
@@ -36,6 +39,7 @@ class ElasticSearchServiceTest {
     private ElasticSearchService elasticSearchService;
 
     private Session testSession;
+    private SessionInstanceInfo testInstance;
     private String testSessionId;
     private String testUniqueId;
     private String testTargetIndex;
@@ -62,6 +66,9 @@ class ElasticSearchServiceTest {
                 .updatedTime(new Date())
                 .sessionInstances(new ArrayList<>())
                 .build();
+
+        testInstance = new SessionInstanceInfo(
+                new Date(), "msg-1", "ACCOUNTING_INTERIM", "service-123", 512L, "bucket-456");
     }
 
     // ============ getCurrentIndex Tests ============
@@ -84,226 +91,125 @@ class ElasticSearchServiceTest {
         assertTrue(result.startsWith(BASE_INDEX + "-"));
     }
 
-    // ============ indexSession Success Tests ============
+    // ============ appendInstance Success Tests ============
 
     @Test
-    void testIndexSession_Success_ActiveSession() {
-        IndexResponse mockResponse = createMockIndexResponse("created");
-        when(elasticsearchClient.index(any(IndexRequest.class)))
-                .thenReturn(CompletableFuture.completedFuture(mockResponse));
+    void testAppendInstance_Success_ActiveSession() {
+        mockUpdate("updated");
 
-        elasticSearchService.indexSession(testSession, testUniqueId, testTargetIndex)
+        elasticSearchService.appendInstance(testSession, testUniqueId, testTargetIndex, testInstance)
                 .await().indefinitely();
 
-        verify(elasticsearchClient, times(1)).index(any(IndexRequest.class));
+        verify(elasticsearchClient, times(1)).update(any(UpdateRequest.class), eq(Session.class));
     }
 
     @Test
-    void testIndexSession_Success_CompletedSession() {
+    void testAppendInstance_Success_CompletedSession() {
         testSession.setConnectionStatus(SessionStatus.COMPLETED);
         testSession.setEndTime(new Date());
+        mockUpdate("updated");
 
-        IndexResponse mockResponse = createMockIndexResponse("updated");
-        when(elasticsearchClient.index(any(IndexRequest.class)))
-                .thenReturn(CompletableFuture.completedFuture(mockResponse));
-
-        elasticSearchService.indexSession(testSession, testUniqueId, testTargetIndex)
+        elasticSearchService.appendInstance(testSession, testUniqueId, testTargetIndex, testInstance)
                 .await().indefinitely();
 
-        verify(elasticsearchClient, times(1)).index(any(IndexRequest.class));
+        verify(elasticsearchClient, times(1)).update(any(UpdateRequest.class), eq(Session.class));
     }
 
     @Test
-    void testIndexSession_Success_TerminatedSession() {
-        testSession.setConnectionStatus(SessionStatus.TERMINATED);
-        testSession.setEndTime(new Date());
+    void testAppendInstance_NewDocument_Created() {
+        mockUpdate("created");
 
-        IndexResponse mockResponse = createMockIndexResponse("updated");
-        when(elasticsearchClient.index(any(IndexRequest.class)))
-                .thenReturn(CompletableFuture.completedFuture(mockResponse));
-
-        elasticSearchService.indexSession(testSession, testUniqueId, testTargetIndex)
+        elasticSearchService.appendInstance(testSession, testUniqueId, testTargetIndex, testInstance)
                 .await().indefinitely();
 
-        verify(elasticsearchClient, times(1)).index(any(IndexRequest.class));
+        verify(elasticsearchClient, times(1)).update(any(UpdateRequest.class), eq(Session.class));
     }
 
     @Test
-    void testIndexSession_Success_TerminationRequestedSession() {
-        testSession.setConnectionStatus(SessionStatus.TERMINATION_REQUESTED);
+    void testAppendInstance_CarriesInstanceInUpsert() {
+        mockUpdate("created");
 
-        IndexResponse mockResponse = createMockIndexResponse("updated");
-        when(elasticsearchClient.index(any(IndexRequest.class)))
-                .thenReturn(CompletableFuture.completedFuture(mockResponse));
-
-        elasticSearchService.indexSession(testSession, testUniqueId, testTargetIndex)
+        elasticSearchService.appendInstance(testSession, testUniqueId, testTargetIndex, testInstance)
                 .await().indefinitely();
 
-        verify(elasticsearchClient, times(1)).index(any(IndexRequest.class));
+        // The upsert document must carry exactly the one new instance so a first-time session is
+        // created with its history seeded.
+        assertEquals(1, testSession.getSessionInstances().size());
+        assertSame(testInstance, testSession.getSessionInstances().get(0));
     }
 
     @Test
-    void testIndexSession_ResultCreated() {
-        IndexResponse mockResponse = createMockIndexResponse("created");
-        when(elasticsearchClient.index(any(IndexRequest.class)))
-                .thenReturn(CompletableFuture.completedFuture(mockResponse));
+    void testAppendInstance_MultipleSequentialCalls() {
+        mockUpdate("updated");
 
-        elasticSearchService.indexSession(testSession, testUniqueId, testTargetIndex)
+        elasticSearchService.appendInstance(testSession, testUniqueId, testTargetIndex, testInstance)
+                .await().indefinitely();
+        elasticSearchService.appendInstance(testSession, testUniqueId, testTargetIndex, testInstance)
+                .await().indefinitely();
+        elasticSearchService.appendInstance(testSession, testUniqueId, testTargetIndex, testInstance)
                 .await().indefinitely();
 
-        verify(elasticsearchClient, times(1)).index(any(IndexRequest.class));
+        verify(elasticsearchClient, times(3)).update(any(UpdateRequest.class), eq(Session.class));
     }
 
-    @Test
-    void testIndexSession_ResultUpdated() {
-        IndexResponse mockResponse = createMockIndexResponse("updated");
-        when(elasticsearchClient.index(any(IndexRequest.class)))
-                .thenReturn(CompletableFuture.completedFuture(mockResponse));
-
-        elasticSearchService.indexSession(testSession, testUniqueId, testTargetIndex)
-                .await().indefinitely();
-
-        verify(elasticsearchClient, times(1)).index(any(IndexRequest.class));
-    }
+    // ============ Rolling Index / Routing Correctness ============
 
     @Test
-    void testIndexSession_NullSessionFields() {
-        Session sessionWithNulls = Session.builder()
-                .sessionId(testSessionId)
-                .connectionStatus(SessionStatus.ACTIVE)
-                .build();
-
-        IndexResponse mockResponse = createMockIndexResponse("created");
-        when(elasticsearchClient.index(any(IndexRequest.class)))
-                .thenReturn(CompletableFuture.completedFuture(mockResponse));
-
-        elasticSearchService.indexSession(sessionWithNulls, testUniqueId, testTargetIndex)
-                .await().indefinitely();
-
-        verify(elasticsearchClient, times(1)).index(any(IndexRequest.class));
-    }
-
-    @Test
-    void testIndexSession_UnknownStatus() {
-        testSession.setConnectionStatus(SessionStatus.UNKNOWN);
-
-        IndexResponse mockResponse = createMockIndexResponse("created");
-        when(elasticsearchClient.index(any(IndexRequest.class)))
-                .thenReturn(CompletableFuture.completedFuture(mockResponse));
-
-        elasticSearchService.indexSession(testSession, testUniqueId, testTargetIndex)
-                .await().indefinitely();
-
-        verify(elasticsearchClient, times(1)).index(any(IndexRequest.class));
-    }
-
-    @Test
-    void testIndexSession_DifferentUniqueIds() {
-        IndexResponse mockResponse = createMockIndexResponse("created");
-        when(elasticsearchClient.index(any(IndexRequest.class)))
-                .thenReturn(CompletableFuture.completedFuture(mockResponse));
-
-        elasticSearchService.indexSession(testSession, "session-1-port-1", testTargetIndex)
-                .await().indefinitely();
-        elasticSearchService.indexSession(testSession, "session-2-port-2", testTargetIndex)
-                .await().indefinitely();
-
-        verify(elasticsearchClient, times(2)).index(any(IndexRequest.class));
-    }
-
-    @Test
-    void testIndexSession_MultipleSequentialCalls() {
-        IndexResponse mockResponse = createMockIndexResponse("created");
-        when(elasticsearchClient.index(any(IndexRequest.class)))
-                .thenReturn(CompletableFuture.completedFuture(mockResponse));
-
-        elasticSearchService.indexSession(testSession, testUniqueId, testTargetIndex)
-                .await().indefinitely();
-        elasticSearchService.indexSession(testSession, testUniqueId, testTargetIndex)
-                .await().indefinitely();
-        elasticSearchService.indexSession(testSession, testUniqueId, testTargetIndex)
-                .await().indefinitely();
-
-        verify(elasticsearchClient, times(3)).index(any(IndexRequest.class));
-    }
-
-    // ============ Rolling Index Correctness Test ============
-
-    @Test
-    void testIndexSession_UsesProvidedTargetIndex_NotCurrentDay() {
+    void testAppendInstance_UsesProvidedTargetIndex_NotCurrentDay() {
         String yesterdayIndex = BASE_INDEX + "-"
                 + LocalDate.now(ZoneOffset.UTC).minusDays(1)
                 .format(DateTimeFormatter.ofPattern("yyyy.MM.dd"));
+        mockUpdate("updated");
 
-        IndexResponse mockResponse = createMockIndexResponse("updated");
-        when(elasticsearchClient.index(any(IndexRequest.class)))
-                .thenReturn(CompletableFuture.completedFuture(mockResponse));
-
-        elasticSearchService.indexSession(testSession, testUniqueId, yesterdayIndex)
+        elasticSearchService.appendInstance(testSession, testUniqueId, yesterdayIndex, testInstance)
                 .await().indefinitely();
 
-        ArgumentCaptor<IndexRequest<Session>> captor = ArgumentCaptor.forClass(IndexRequest.class);
-        verify(elasticsearchClient).index(captor.capture());
+        ArgumentCaptor<UpdateRequest<Session, Session>> captor = captureUpdate();
+        verify(elasticsearchClient).update(captor.capture(), eq(Session.class));
         assertEquals(yesterdayIndex, captor.getValue().index(),
-                "STOP event should write to the session's birth index, not today's index");
+                "Append should write to the session's birth index, not today's index");
     }
 
     @Test
-    void testIndexSession_CorrectIndexName() {
-        IndexResponse mockResponse = createMockIndexResponse("created");
-        when(elasticsearchClient.index(any(IndexRequest.class)))
-                .thenReturn(CompletableFuture.completedFuture(mockResponse));
+    void testAppendInstance_CorrectIndexAndId() {
+        mockUpdate("created");
 
-        elasticSearchService.indexSession(testSession, testUniqueId, testTargetIndex)
+        elasticSearchService.appendInstance(testSession, testUniqueId, testTargetIndex, testInstance)
                 .await().indefinitely();
 
-        ArgumentCaptor<IndexRequest<Session>> captor = ArgumentCaptor.forClass(IndexRequest.class);
-        verify(elasticsearchClient).index(captor.capture());
+        ArgumentCaptor<UpdateRequest<Session, Session>> captor = captureUpdate();
+        verify(elasticsearchClient).update(captor.capture(), eq(Session.class));
         assertEquals(testTargetIndex, captor.getValue().index(),
-                "IndexRequest should use the targetIndex passed by the caller");
+                "UpdateRequest should use the targetIndex passed by the caller");
+        assertEquals(testUniqueId, captor.getValue().id(),
+                "UpdateRequest should be keyed by the unique session id");
     }
 
     // ============ Error Tests ============
 
     @Test
-    void testIndexSession_IOExceptionThrown() {
+    void testAppendInstance_IOExceptionThrown() {
         IOException ioException = new IOException("Connection timeout");
-        when(elasticsearchClient.index(any(IndexRequest.class)))
+        when(elasticsearchClient.update(any(UpdateRequest.class), eq(Session.class)))
                 .thenReturn(CompletableFuture.failedFuture(ioException));
 
         Throwable thrown = assertThrows(Throwable.class, () ->
-                elasticSearchService.indexSession(testSession, testUniqueId, testTargetIndex)
+                elasticSearchService.appendInstance(testSession, testUniqueId, testTargetIndex, testInstance)
                         .await().indefinitely()
         );
 
-        Throwable root = unwrap(thrown);
-        assertSame(ioException, root);
-        verify(elasticsearchClient, times(1)).index(any(IndexRequest.class));
+        assertSame(ioException, unwrap(thrown));
+        verify(elasticsearchClient, times(1)).update(any(UpdateRequest.class), eq(Session.class));
     }
 
     @Test
-    void testIndexSession_IOExceptionWithCustomMessage() {
-        IOException ioException = new IOException("Index not found");
-        when(elasticsearchClient.index(any(IndexRequest.class)))
-                .thenReturn(CompletableFuture.failedFuture(ioException));
-
-        Throwable thrown = assertThrows(Throwable.class, () ->
-                elasticSearchService.indexSession(testSession, testUniqueId, testTargetIndex)
-                        .await().indefinitely()
-        );
-
-        Throwable root = unwrap(thrown);
-        assertTrue(root.getMessage().contains("Index not found"));
-    }
-
-    @Test
-    void testIndexSession_ExceptionWrapping() {
+    void testAppendInstance_ExceptionWrapping() {
         IOException originalException = new IOException("Network error");
-        when(elasticsearchClient.index(any(IndexRequest.class)))
+        when(elasticsearchClient.update(any(UpdateRequest.class), eq(Session.class)))
                 .thenReturn(CompletableFuture.failedFuture(originalException));
 
         Throwable thrown = assertThrows(Throwable.class, () ->
-                elasticSearchService.indexSession(testSession, testUniqueId, testTargetIndex)
+                elasticSearchService.appendInstance(testSession, testUniqueId, testTargetIndex, testInstance)
                         .await().indefinitely()
         );
 
@@ -312,21 +218,26 @@ class ElasticSearchServiceTest {
 
     // ============ Helper Methods ============
 
+    @SuppressWarnings("unchecked")
+    private void mockUpdate(String result) {
+        UpdateResponse<Session> mockResponse = mock(UpdateResponse.class);
+        when(mockResponse.result()).thenReturn(
+                Result.valueOf(result.substring(0, 1).toUpperCase() + result.substring(1)));
+        when(elasticsearchClient.update(any(UpdateRequest.class), eq(Session.class)))
+                .thenReturn(CompletableFuture.completedFuture(mockResponse));
+    }
+
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    private ArgumentCaptor<UpdateRequest<Session, Session>> captureUpdate() {
+        return (ArgumentCaptor) ArgumentCaptor.forClass(UpdateRequest.class);
+    }
+
     private Throwable unwrap(Throwable t) {
         Throwable current = t;
         while (current instanceof CompletionException && current.getCause() != null) {
             current = current.getCause();
         }
         return current;
-    }
-
-    private IndexResponse createMockIndexResponse(String result) {
-        IndexResponse mockResponse = mock(IndexResponse.class);
-        when(mockResponse.result()).thenReturn(
-                co.elastic.clients.elasticsearch._types.Result.valueOf(
-                        result.substring(0, 1).toUpperCase() + result.substring(1))
-        );
-        return mockResponse;
     }
 
     private void setPrivateField(Object target, String fieldName, Object value) {
