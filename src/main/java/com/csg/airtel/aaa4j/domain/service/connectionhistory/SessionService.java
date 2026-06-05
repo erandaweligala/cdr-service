@@ -234,12 +234,20 @@ public class SessionService {
     private Uni<Void> saveAndAppend(Session session, AccountingEvent event, String uniqueSessionId, boolean saveToRedis) {
         SessionInstanceInfo instanceInfo = createInstanceInfo(event);
 
-        Uni<Void> redisSave = saveToRedis
-                ? redisRepository.save(session, uniqueSessionId)
-                : Uni.createFrom().voidItem();
+        // ES append and Redis save are independent (they share no mutable state), so run them
+        // concurrently instead of one-after-the-other. Each lane processes one event at a time,
+        // so per-event wall-clock latency directly limits per-lane throughput: overlapping the
+        // two round-trips cuts the critical path from read -> save -> append to read -> max(save,
+        // append), raising throughput without needing more CPU.
+        Uni<Void> esAppend = elasticsearchService.appendInstance(
+                session, uniqueSessionId, session.getIndexName(), instanceInfo);
 
-        return redisSave.chain(() -> elasticsearchService.appendInstance(
-                session, uniqueSessionId, session.getIndexName(), instanceInfo));
+        if (!saveToRedis) {
+            return esAppend;
+        }
+
+        Uni<Void> redisSave = redisRepository.save(session, uniqueSessionId);
+        return Uni.combine().all().unis(redisSave, esAppend).discardItems();
     }
 
     /**

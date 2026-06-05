@@ -65,12 +65,25 @@ public class ElasticSearchService {
      * former full-document re-index so per-event cost stays O(1) regardless of session length.
      */
     public Uni<Void> appendInstance(Session session, String id, String targetIndex, SessionInstanceInfo instanceInfo) {
-        // The upsert document (used only when the document does not yet exist) must already
-        // carry the first instance; for existing documents the script appends it instead.
-        session.setSessionInstances(new ArrayList<>(List.of(instanceInfo)));
+        // Build a private upsert copy that carries the one new instance, WITHOUT mutating the
+        // caller's session. This keeps the Redis copy slim and, crucially, lets the caller run
+        // the Redis write and this ES write concurrently (no shared mutable state between them).
+        Session upsertDoc = Session.builder()
+                .uniqueId(session.getUniqueId())
+                .sessionId(session.getSessionId())
+                .startTime(session.getStartTime())
+                .endTime(session.getEndTime())
+                .connectionStatus(session.getConnectionStatus())
+                .usage(session.getUsage())
+                .userName(session.getUserName())
+                .groupId(session.getGroupId())
+                .updatedTime(session.getUpdatedTime())
+                .indexName(session.getIndexName())
+                .sessionInstances(new ArrayList<>(List.of(instanceInfo)))
+                .build();
 
         Map<String, JsonData> params = new HashMap<>();
-        params.put("session", JsonData.of(session));
+        params.put("session", JsonData.of(upsertDoc));
         params.put("instance", JsonData.of(instanceInfo));
 
         UpdateRequest<Session, Session> request = new UpdateRequest.Builder<Session, Session>()
@@ -80,7 +93,7 @@ public class ElasticSearchService {
                         .lang("painless")
                         .source(APPEND_INSTANCE_SCRIPT)
                         .params(params)))
-                .upsert(session)
+                .upsert(upsertDoc)
                 .retryOnConflict(3)
                 .build();
 
