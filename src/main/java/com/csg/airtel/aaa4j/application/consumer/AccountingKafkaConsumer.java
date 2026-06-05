@@ -51,10 +51,10 @@ public class AccountingKafkaConsumer {
         AccountingEvent event = message.getPayload();
         setMdcContext(event);
 
-        LoggingUtil.logInfo(LOG, "processMessage", "Received event from [%s]: %s", channel, event.getEventId());
+        LoggingUtil.logDebug(LOG, "processMessage", "Received event from [%s]: %s", channel, event.getEventId());
 
         return Uni.createFrom().deferred(() -> processEvent(event))
-                .invoke(() -> LoggingUtil.logInfo(LOG, "processMessage",
+                .invoke(() -> LoggingUtil.logDebug(LOG, "processMessage",
                         "Event processed successfully from [%s]: %s",
                         channel,
                         event.getEventId()))

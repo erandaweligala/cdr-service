@@ -44,6 +44,11 @@ mp:
         connector: smallrye-kafka
         topic: cdr-event
         group.id: accounting-service
+        # Concurrent per-partition processing (preserves in-partition ordering) so the
+        # consumer keeps up with ~2000 TPS instead of processing one record at a time.
+        # concurrency = partitions(21) / pods(7) = 3 per pod; one Kafka consumer per
+        # partition, no idle lanes, bounded fetch-buffer memory on a 1 core / 2 GB pod.
+        concurrency: 3
         value.deserializer: io.quarkus.kafka.client.serialization.ObjectMapperDeserializer
         key.deserializer: org.apache.kafka.common.serialization.StringDeserializer
         auto.offset.reset: earliest

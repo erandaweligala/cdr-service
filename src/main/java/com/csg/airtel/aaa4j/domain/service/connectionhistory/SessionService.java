@@ -32,7 +32,7 @@ public class SessionService {
      * Process ACCOUNTING_START event
      */
     public Uni<Void> processStartEvent(AccountingEvent event) {
-        LoggingUtil.logInfo(LOG, "processStartEvent", "Processing START event: %s", event.getEventId());
+        LoggingUtil.logDebug(LOG, "processStartEvent", "Processing START event: %s", event.getEventId());
 
         return Uni.createFrom().item(() -> getUniqueIdFromSessionCDR(event.getPayload().getSession()))
                 .flatMap(uniqueSessionId -> redisRepository.findBySessionId(uniqueSessionId)
@@ -50,10 +50,8 @@ public class SessionService {
                                         event.getEventType(), uniqueSessionId);
                                 session = createSession(event, uniqueSessionId);
                             }
-                            return addInstanceInfoAndSave(session, event, true, uniqueSessionId)
-                                    .chain(() -> elasticsearchService.indexSession(
-                                            session, uniqueSessionId, session.getIndexName()))
-                                    .invoke(() -> LoggingUtil.logInfo(LOG, "processStartEvent",
+                            return saveAndAppend(session, event, uniqueSessionId, true)
+                                    .invoke(() -> LoggingUtil.logDebug(LOG, "processStartEvent",
                                             "START event processed successfully: %s",
                                             session.getSessionId()));
                         }));
@@ -75,16 +73,14 @@ public class SessionService {
      * Process ACCOUNTING_INTERIM event
      */
     public Uni<Void> processInterimEvent(AccountingEvent event) {
-        LoggingUtil.logInfo(LOG, "processInterimEvent", "Processing INTERIM event: %s", event.getEventId());
+        LoggingUtil.logDebug(LOG, "processInterimEvent", "Processing INTERIM event: %s", event.getEventId());
 
         return Uni.createFrom().item(() -> getUniqueIdFromSessionCDR(event.getPayload().getSession()))
                 .flatMap(uniqueSessionId -> getOrCreateSession(uniqueSessionId, event)
                         .flatMap(session -> {
                             updateSessionFromInterim(session, event);
-                            return addInstanceInfoAndSave(session, event, true, uniqueSessionId)
-                                    .chain(() -> elasticsearchService.indexSession(
-                                            session, uniqueSessionId, session.getIndexName()))
-                                    .invoke(() -> LoggingUtil.logInfo(LOG, "processInterimEvent",
+                            return saveAndAppend(session, event, uniqueSessionId, true)
+                                    .invoke(() -> LoggingUtil.logDebug(LOG, "processInterimEvent",
                                             "INTERIM event processed successfully: %s",
                                             uniqueSessionId));
                         }));
@@ -94,17 +90,15 @@ public class SessionService {
      * Process ACCOUNTING_STOP event
      */
     public Uni<Void> processStopEvent(AccountingEvent event) {
-        LoggingUtil.logInfo(LOG, "processStopEvent", "Processing STOP event: %s", event.getEventId());
+        LoggingUtil.logDebug(LOG, "processStopEvent", "Processing STOP event: %s", event.getEventId());
 
         return Uni.createFrom().item(() -> getUniqueIdFromSessionCDR(event.getPayload().getSession()))
                 .flatMap(uniqueSessionId -> getOrCreateSession(uniqueSessionId, event)
                         .flatMap(session -> {
                             updateSessionFromStop(session, event);
-                            return addInstanceInfoAndSave(session, event, false, uniqueSessionId)
-                                    .chain(() -> elasticsearchService.indexSession(
-                                            session, uniqueSessionId, session.getIndexName()))
+                            return saveAndAppend(session, event, uniqueSessionId, false)
                                     .chain(() -> redisRepository.delete(uniqueSessionId))
-                                    .invoke(() -> LoggingUtil.logInfo(LOG, "processStopEvent",
+                                    .invoke(() -> LoggingUtil.logDebug(LOG, "processStopEvent",
                                             "STOP event processed successfully: %s",
                                             uniqueSessionId));
                         }));
@@ -114,16 +108,14 @@ public class SessionService {
      * Process COA_REQUEST event
      */
     public Uni<Void> processCoaRequestEvent(AccountingEvent event) {
-        LoggingUtil.logInfo(LOG, "processCoaRequestEvent", "Processing COA REQUEST event: %s", event.getEventId());
+        LoggingUtil.logDebug(LOG, "processCoaRequestEvent", "Processing COA REQUEST event: %s", event.getEventId());
 
         return Uni.createFrom().item(() -> getUniqueIdFromSessionCDR(event.getPayload().getSession()))
                 .flatMap(uniqueSessionId -> getOrCreateSession(uniqueSessionId, event)
                         .flatMap(session -> {
                             updateSessionFromCoa(session, event);
-                            return addInstanceInfoAndSave(session, event, false, uniqueSessionId)
-                                    .chain(() -> elasticsearchService.indexSession(
-                                            session, uniqueSessionId, session.getIndexName()))
-                                    .invoke(() -> LoggingUtil.logInfo(LOG, "processCoaRequestEvent",
+                            return saveAndAppend(session, event, uniqueSessionId, false)
+                                    .invoke(() -> LoggingUtil.logDebug(LOG, "processCoaRequestEvent",
                                             "COA REQUEST event processed successfully: %s",
                                             uniqueSessionId));
                         }));
@@ -133,7 +125,7 @@ public class SessionService {
      * Process COA_RESPONSE event
      */
     public Uni<Void> processCoaResponseEvent(AccountingEvent event) {
-        LoggingUtil.logInfo(LOG, "processCoaResponseEvent", "Processing COA RESPONSE event: %s", event.getEventId());
+        LoggingUtil.logDebug(LOG, "processCoaResponseEvent", "Processing COA RESPONSE event: %s", event.getEventId());
 
         return Uni.createFrom().item(() -> getUniqueIdFromSessionCDR(event.getPayload().getSession()))
                 .flatMap(uniqueSessionId -> getOrCreateSession(uniqueSessionId, event)
@@ -142,16 +134,17 @@ public class SessionService {
                             COA coa = event.getPayload().getCoa();
                             session.setConnectionStatus(getSessionStatusFromCoaResponse(coa));
 
-                            Uni<Void> tail = addInstanceInfoAndSave(session, event, false, uniqueSessionId);
-
+                            Uni<Void> tail;
                             if (coa.getStatus().equalsIgnoreCase("NAK")) {
-                                tail = tail
-                                        .chain(() -> elasticsearchService.indexSession(
-                                                session, uniqueSessionId, session.getIndexName()))
+                                tail = saveAndAppend(session, event, uniqueSessionId, false)
                                         .chain(() -> redisRepository.delete(uniqueSessionId));
+                            } else {
+                                // ACK: termination requested, await STOP — nothing persisted here
+                                // (matches prior behaviour where the ACK was neither saved nor indexed).
+                                tail = Uni.createFrom().voidItem();
                             }
 
-                            return tail.invoke(() -> LoggingUtil.logInfo(LOG, "processCoaResponseEvent",
+                            return tail.invoke(() -> LoggingUtil.logDebug(LOG, "processCoaResponseEvent",
                                     "COA RESPONSE event processed successfully: %s",
                                     uniqueSessionId));
                         }));
@@ -229,16 +222,24 @@ public class SessionService {
     }
 
     /**
-     * Add instance info and save session
+     * Persist one event: optionally save the (slim) session to Redis, then append this event's
+     * instance to the Elasticsearch document.
+     *
+     * The session's sessionInstances list is intentionally NOT accumulated here. Redis only needs
+     * the latest cumulative state to drive the next event's transition, and Elasticsearch now
+     * appends instances server-side. Keeping the Redis copy slim removes the previous O(N^2)
+     * growth where the whole instance history was deserialized, mutated and re-serialized on
+     * every event — the bottleneck that let Kafka lag build at high TPS.
      */
-    private Uni<Void> addInstanceInfoAndSave(Session session, AccountingEvent event, boolean saveToRedis, String uniqueSessionId) {
+    private Uni<Void> saveAndAppend(Session session, AccountingEvent event, String uniqueSessionId, boolean saveToRedis) {
         SessionInstanceInfo instanceInfo = createInstanceInfo(event);
-        session.getSessionInstances().add(instanceInfo);
 
-        if (saveToRedis) {
-            return redisRepository.save(session, uniqueSessionId);
-        }
-        return Uni.createFrom().voidItem();
+        Uni<Void> redisSave = saveToRedis
+                ? redisRepository.save(session, uniqueSessionId)
+                : Uni.createFrom().voidItem();
+
+        return redisSave.chain(() -> elasticsearchService.appendInstance(
+                session, uniqueSessionId, session.getIndexName(), instanceInfo));
     }
 
     /**

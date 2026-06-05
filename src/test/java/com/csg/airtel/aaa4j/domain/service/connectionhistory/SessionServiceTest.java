@@ -70,7 +70,7 @@ class SessionServiceTest {
                 .thenReturn(Uni.createFrom().voidItem());
         when(redisRepository.delete(anyString()))
                 .thenReturn(Uni.createFrom().voidItem());
-        when(elasticsearchService.indexSession(any(Session.class), anyString(), anyString()))
+        when(elasticsearchService.appendInstance(any(Session.class), anyString(), anyString(), any(SessionInstanceInfo.class)))
                 .thenReturn(Uni.createFrom().voidItem());
         when(elasticsearchService.getCurrentIndex()).thenReturn(todayIndex());
     }
@@ -86,7 +86,7 @@ class SessionServiceTest {
         sessionService.processStartEvent(startEvent).await().indefinitely();
 
         verify(redisRepository, times(1)).save(any(Session.class), eq(uniqueSessionId));
-        verify(elasticsearchService, times(1)).indexSession(any(Session.class), eq(uniqueSessionId), anyString());
+        verify(elasticsearchService, times(1)).appendInstance(any(Session.class), eq(uniqueSessionId), anyString(), any(SessionInstanceInfo.class));
 
         ArgumentCaptor<Session> sessionCaptor = ArgumentCaptor.forClass(Session.class);
         verify(redisRepository).save(sessionCaptor.capture(), eq(uniqueSessionId));
@@ -119,7 +119,7 @@ class SessionServiceTest {
         sessionService.processInterimEvent(interimEvent).await().indefinitely();
 
         verify(redisRepository, times(1)).save(any(Session.class), eq(uniqueSessionId));
-        verify(elasticsearchService, times(1)).indexSession(any(Session.class), eq(uniqueSessionId), anyString());
+        verify(elasticsearchService, times(1)).appendInstance(any(Session.class), eq(uniqueSessionId), anyString(), any(SessionInstanceInfo.class));
 
         ArgumentCaptor<Session> sessionCaptor = ArgumentCaptor.forClass(Session.class);
         verify(redisRepository).save(sessionCaptor.capture(), eq(uniqueSessionId));
@@ -137,11 +137,11 @@ class SessionServiceTest {
 
         sessionService.processStopEvent(stopEvent).await().indefinitely();
 
-        verify(elasticsearchService, times(1)).indexSession(any(Session.class), eq(uniqueSessionId), anyString());
+        verify(elasticsearchService, times(1)).appendInstance(any(Session.class), eq(uniqueSessionId), anyString(), any(SessionInstanceInfo.class));
         verify(redisRepository, times(1)).delete(uniqueSessionId);
 
         ArgumentCaptor<Session> sessionCaptor = ArgumentCaptor.forClass(Session.class);
-        verify(elasticsearchService).indexSession(sessionCaptor.capture(), anyString(), anyString());
+        verify(elasticsearchService).appendInstance(sessionCaptor.capture(), anyString(), anyString(), any(SessionInstanceInfo.class));
         assertEquals(SessionStatus.COMPLETED, sessionCaptor.getValue().getConnectionStatus());
     }
 
@@ -157,7 +157,7 @@ class SessionServiceTest {
         verify(redisRepository, times(1)).delete(uniqueSessionId);
 
         ArgumentCaptor<Session> sessionCaptor = ArgumentCaptor.forClass(Session.class);
-        verify(elasticsearchService).indexSession(sessionCaptor.capture(), anyString(), anyString());
+        verify(elasticsearchService).appendInstance(sessionCaptor.capture(), anyString(), anyString(), any(SessionInstanceInfo.class));
         assertEquals(SessionStatus.TERMINATED, sessionCaptor.getValue().getConnectionStatus());
     }
 
@@ -172,7 +172,7 @@ class SessionServiceTest {
         sessionService.processStopEvent(stopEvent).await().indefinitely();
 
         ArgumentCaptor<Session> sessionCaptor = ArgumentCaptor.forClass(Session.class);
-        verify(elasticsearchService).indexSession(sessionCaptor.capture(), anyString(), anyString());
+        verify(elasticsearchService).appendInstance(sessionCaptor.capture(), anyString(), anyString(), any(SessionInstanceInfo.class));
         assertEquals(Date.from(stopTime), sessionCaptor.getValue().getEndTime());
     }
 
@@ -186,7 +186,7 @@ class SessionServiceTest {
         sessionService.processStopEvent(stopEvent).await().indefinitely();
 
         ArgumentCaptor<Session> sessionCaptor = ArgumentCaptor.forClass(Session.class);
-        verify(elasticsearchService).indexSession(sessionCaptor.capture(), anyString(), anyString());
+        verify(elasticsearchService).appendInstance(sessionCaptor.capture(), anyString(), anyString(), any(SessionInstanceInfo.class));
         assertNotNull(sessionCaptor.getValue().getEndTime());
     }
 
@@ -200,10 +200,10 @@ class SessionServiceTest {
 
         sessionService.processCoaRequestEvent(coaRequestEvent).await().indefinitely();
 
-        verify(elasticsearchService, times(1)).indexSession(any(Session.class), eq(uniqueSessionId), anyString());
+        verify(elasticsearchService, times(1)).appendInstance(any(Session.class), eq(uniqueSessionId), anyString(), any(SessionInstanceInfo.class));
 
         ArgumentCaptor<Session> sessionCaptor = ArgumentCaptor.forClass(Session.class);
-        verify(elasticsearchService).indexSession(sessionCaptor.capture(), anyString(), anyString());
+        verify(elasticsearchService).appendInstance(sessionCaptor.capture(), anyString(), anyString(), any(SessionInstanceInfo.class));
         assertEquals(SessionStatus.TERMINATION_REQUESTED, sessionCaptor.getValue().getConnectionStatus());
     }
 
@@ -217,7 +217,7 @@ class SessionServiceTest {
 
         sessionService.processCoaResponseEvent(ackEvent).await().indefinitely();
 
-        verify(elasticsearchService, never()).indexSession(any(), anyString(), anyString());
+        verify(elasticsearchService, never()).appendInstance(any(), anyString(), anyString(), any());
         verify(redisRepository, never()).delete(anyString());
     }
 
@@ -230,11 +230,11 @@ class SessionServiceTest {
 
         sessionService.processCoaResponseEvent(nackEvent).await().indefinitely();
 
-        verify(elasticsearchService, times(1)).indexSession(any(Session.class), eq(uniqueSessionId), anyString());
+        verify(elasticsearchService, times(1)).appendInstance(any(Session.class), eq(uniqueSessionId), anyString(), any(SessionInstanceInfo.class));
         verify(redisRepository, times(1)).delete(uniqueSessionId);
 
         ArgumentCaptor<Session> sessionCaptor = ArgumentCaptor.forClass(Session.class);
-        verify(elasticsearchService).indexSession(sessionCaptor.capture(), anyString(), anyString());
+        verify(elasticsearchService).appendInstance(sessionCaptor.capture(), anyString(), anyString(), any(SessionInstanceInfo.class));
         assertEquals(SessionStatus.TERMINATED, sessionCaptor.getValue().getConnectionStatus());
     }
 
@@ -250,7 +250,7 @@ class SessionServiceTest {
         sessionService.processCoaResponseEvent(nackEvent).await().indefinitely();
 
         ArgumentCaptor<Session> sessionCaptor = ArgumentCaptor.forClass(Session.class);
-        verify(elasticsearchService).indexSession(sessionCaptor.capture(), anyString(), anyString());
+        verify(elasticsearchService).appendInstance(sessionCaptor.capture(), anyString(), anyString(), any(SessionInstanceInfo.class));
         assertEquals(Date.from(stopTime), sessionCaptor.getValue().getEndTime());
     }
 
@@ -265,7 +265,7 @@ class SessionServiceTest {
         sessionService.processCoaResponseEvent(nackEvent).await().indefinitely();
 
         ArgumentCaptor<Session> sessionCaptor = ArgumentCaptor.forClass(Session.class);
-        verify(elasticsearchService).indexSession(sessionCaptor.capture(), anyString(), anyString());
+        verify(elasticsearchService).appendInstance(sessionCaptor.capture(), anyString(), anyString(), any(SessionInstanceInfo.class));
         assertNotNull(sessionCaptor.getValue().getEndTime());
     }
 
@@ -279,7 +279,7 @@ class SessionServiceTest {
 
         sessionService.processCoaResponseEvent(coaEvent).await().indefinitely();
 
-        verify(elasticsearchService, never()).indexSession(any(), anyString(), anyString());
+        verify(elasticsearchService, never()).appendInstance(any(), anyString(), anyString(), any());
     }
 
     // ============ SessionInstanceInfo Tests ============
@@ -292,14 +292,12 @@ class SessionServiceTest {
 
         sessionService.processInterimEvent(interimEvent).await().indefinitely();
 
-        ArgumentCaptor<Session> sessionCaptor = ArgumentCaptor.forClass(Session.class);
-        verify(redisRepository).save(sessionCaptor.capture(), eq(uniqueSessionId));
+        // The instance is sent to Elasticsearch as a discrete argument now (slim Redis copy),
+        // so assert on what is appended rather than on the session's accumulated list.
+        ArgumentCaptor<SessionInstanceInfo> instanceCaptor = ArgumentCaptor.forClass(SessionInstanceInfo.class);
+        verify(elasticsearchService).appendInstance(any(Session.class), eq(uniqueSessionId), anyString(), instanceCaptor.capture());
 
-        Session savedSession = sessionCaptor.getValue();
-        assertFalse(savedSession.getSessionInstances().isEmpty());
-
-        SessionInstanceInfo instanceInfo = savedSession.getSessionInstances()
-                .get(savedSession.getSessionInstances().size() - 1);
+        SessionInstanceInfo instanceInfo = instanceCaptor.getValue();
         assertEquals(interimEvent.getEventId(), instanceInfo.getMessageId());
         assertEquals(interimEvent.getEventType(), instanceInfo.getMessageType());
         assertNotNull(instanceInfo.getUsage());
@@ -316,14 +314,10 @@ class SessionServiceTest {
 
         sessionService.processCoaRequestEvent(coaRequestEvent).await().indefinitely();
 
-        ArgumentCaptor<Session> sessionCaptor = ArgumentCaptor.forClass(Session.class);
-        verify(elasticsearchService).indexSession(sessionCaptor.capture(), anyString(), anyString());
+        ArgumentCaptor<SessionInstanceInfo> instanceCaptor = ArgumentCaptor.forClass(SessionInstanceInfo.class);
+        verify(elasticsearchService).appendInstance(any(Session.class), eq(uniqueSessionId), anyString(), instanceCaptor.capture());
 
-        Session savedSession = sessionCaptor.getValue();
-        assertFalse(savedSession.getSessionInstances().isEmpty());
-
-        SessionInstanceInfo instanceInfo = savedSession.getSessionInstances()
-                .get(savedSession.getSessionInstances().size() - 1);
+        SessionInstanceInfo instanceInfo = instanceCaptor.getValue();
         assertEquals(coaRequestEvent.getEventId(), instanceInfo.getMessageId());
         assertNull(instanceInfo.getUsage());
         assertNull(instanceInfo.getServiceId());
@@ -341,7 +335,7 @@ class SessionServiceTest {
         sessionService.processCoaRequestEvent(coaRequestEvent).await().indefinitely();
 
         ArgumentCaptor<Session> sessionCaptor = ArgumentCaptor.forClass(Session.class);
-        verify(elasticsearchService).indexSession(sessionCaptor.capture(), anyString(), anyString());
+        verify(elasticsearchService).appendInstance(sessionCaptor.capture(), anyString(), anyString(), any(SessionInstanceInfo.class));
         assertEquals(SessionStatus.TERMINATION_REQUESTED, sessionCaptor.getValue().getConnectionStatus());
         assertNotNull(sessionCaptor.getValue().getUpdatedTime());
     }
@@ -359,7 +353,7 @@ class SessionServiceTest {
         assertTrue(exception.getMessage().contains("Incomplete CDR Data"));
         assertTrue(exception.getMessage().contains("sessionId and nasPort are required"));
         assertEquals(HttpStatus.SC_BAD_REQUEST, exception.getHttpStatus());
-        verify(elasticsearchService, never()).indexSession(any(), anyString(), anyString());
+        verify(elasticsearchService, never()).appendInstance(any(), anyString(), anyString(), any());
         verify(redisRepository, never()).save(any(), anyString());
     }
 
@@ -374,7 +368,7 @@ class SessionServiceTest {
         assertTrue(exception.getMessage().contains("Incomplete CDR Data"));
         assertTrue(exception.getMessage().contains("sessionId and nasPort are required"));
         assertEquals(HttpStatus.SC_BAD_REQUEST, exception.getHttpStatus());
-        verify(elasticsearchService, never()).indexSession(any(), anyString(), anyString());
+        verify(elasticsearchService, never()).appendInstance(any(), anyString(), anyString(), any());
         verify(redisRepository, never()).save(any(), anyString());
     }
 
@@ -389,7 +383,7 @@ class SessionServiceTest {
 
         assertTrue(exception.getMessage().contains("Incomplete CDR Data"));
         assertEquals(HttpStatus.SC_BAD_REQUEST, exception.getHttpStatus());
-        verify(elasticsearchService, never()).indexSession(any(), anyString(), anyString());
+        verify(elasticsearchService, never()).appendInstance(any(), anyString(), anyString(), any());
         verify(redisRepository, never()).save(any(), anyString());
     }
 
@@ -415,7 +409,7 @@ class SessionServiceTest {
         assertThrows(BaseException.class, () ->
                 sessionService.processCoaResponseEvent(coaResponseEvent).await().indefinitely());
 
-        verify(elasticsearchService, never()).indexSession(any(), anyString(), anyString());
+        verify(elasticsearchService, never()).appendInstance(any(), anyString(), anyString(), any());
         verify(redisRepository, never()).save(any(), anyString());
     }
 
@@ -429,7 +423,7 @@ class SessionServiceTest {
         sessionService.processCoaResponseEvent(nackLowerCase).await().indefinitely();
 
         verify(redisRepository, times(1)).delete(uniqueSessionId);
-        verify(elasticsearchService, times(1)).indexSession(any(Session.class), anyString(), anyString());
+        verify(elasticsearchService, times(1)).appendInstance(any(Session.class), anyString(), anyString(), any(SessionInstanceInfo.class));
     }
 
     @Test
@@ -458,7 +452,7 @@ class SessionServiceTest {
         sessionService.processCoaResponseEvent(nakEvent).await().indefinitely();
 
         ArgumentCaptor<Session> sessionCaptor = ArgumentCaptor.forClass(Session.class);
-        verify(elasticsearchService).indexSession(sessionCaptor.capture(), anyString(), anyString());
+        verify(elasticsearchService).appendInstance(sessionCaptor.capture(), anyString(), anyString(), any(SessionInstanceInfo.class));
         assertEquals(SessionStatus.TERMINATED, sessionCaptor.getValue().getConnectionStatus());
     }
 
@@ -472,7 +466,7 @@ class SessionServiceTest {
         sessionService.processCoaResponseEvent(nakLowerEvent).await().indefinitely();
 
         ArgumentCaptor<Session> sessionCaptor = ArgumentCaptor.forClass(Session.class);
-        verify(elasticsearchService).indexSession(sessionCaptor.capture(), anyString(), anyString());
+        verify(elasticsearchService).appendInstance(sessionCaptor.capture(), anyString(), anyString(), any(SessionInstanceInfo.class));
         assertEquals(SessionStatus.TERMINATED, sessionCaptor.getValue().getConnectionStatus());
     }
 
