@@ -126,16 +126,24 @@ class ElasticSearchServiceTest {
     }
 
     @Test
-    void testAppendInstance_CarriesInstanceInUpsert() {
+    void testAppendInstance_CarriesInstanceInUpsert_WithoutMutatingCaller() {
         mockUpdate("created");
 
         elasticSearchService.appendInstance(testSession, testUniqueId, testTargetIndex, testInstance)
                 .await().indefinitely();
 
-        // The upsert document must carry exactly the one new instance so a first-time session is
-        // created with its history seeded.
-        assertEquals(1, testSession.getSessionInstances().size());
-        assertSame(testInstance, testSession.getSessionInstances().get(0));
+        // The caller's session must NOT be mutated (so it can be serialized to Redis concurrently).
+        assertTrue(testSession.getSessionInstances().isEmpty(),
+                "appendInstance must not mutate the caller's session");
+
+        // The upsert document, however, must carry exactly the one new instance so a first-time
+        // session is created with its history seeded.
+        ArgumentCaptor<UpdateRequest<Session, Session>> captor = captureUpdate();
+        verify(elasticsearchClient).update(captor.capture(), eq(Session.class));
+        Session upsertDoc = captor.getValue().upsert();
+        assertNotNull(upsertDoc, "scripted update must provide an upsert document");
+        assertEquals(1, upsertDoc.getSessionInstances().size());
+        assertSame(testInstance, upsertDoc.getSessionInstances().get(0));
     }
 
     @Test
