@@ -99,6 +99,12 @@ mp:
         connector: smallrye-kafka
         topic: cdr-event-dc
         group.id: cdr-service
+        # Process partitions concurrently while preserving in-partition (per-session-key)
+        # ordering. Without this the channel processes one record at a time, awaiting the
+        # full Redis+Elasticsearch round-trip chain per event, which caps throughput well
+        # below 2000 TPS and lets Kafka lag accumulate. Tune to the partition count the
+        # consumer is assigned (per pod).
+        concurrency: 12
         value.deserializer: io.quarkus.kafka.client.serialization.ObjectMapperDeserializer
         key.deserializer: org.apache.kafka.common.serialization.StringDeserializer
         auto.offset.reset: earliest
@@ -117,6 +123,8 @@ mp:
         connector: smallrye-kafka
         topic: dc.cdr-event-dr
         group.id: cdr-service
+        # See accounting-cdr-events: concurrent per-partition processing to sustain 2000 TPS.
+        concurrency: 12
         value.deserializer: io.quarkus.kafka.client.serialization.ObjectMapperDeserializer
         key.deserializer: org.apache.kafka.common.serialization.StringDeserializer
         auto.offset.reset: earliest

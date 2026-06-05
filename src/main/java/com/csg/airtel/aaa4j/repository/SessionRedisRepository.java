@@ -5,6 +5,7 @@ import com.csg.airtel.aaa4j.domain.model.connectionhistory.Session;
 import io.quarkus.redis.datasource.ReactiveRedisDataSource;
 import io.quarkus.redis.datasource.keys.ReactiveKeyCommands;
 import io.quarkus.redis.datasource.value.ReactiveValueCommands;
+import io.quarkus.redis.datasource.value.SetArgs;
 import io.smallrye.mutiny.Uni;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -31,9 +32,11 @@ public class SessionRedisRepository {
 
     public Uni<Void> save(Session session, String uniqueSessionId) {
         String key = buildKey(uniqueSessionId);
-        return sessionCommands.set(key, session)
-                .chain(() -> keyCommands.expire(key, SESSION_TTL))
-                .replaceWithVoid()
+        // Single round-trip SET ... EX instead of SET followed by a separate EXPIRE.
+        // At high TPS the extra EXPIRE call doubled the Redis write latency on every
+        // START/INTERIM/STOP/COA event, which serialized the consumer pipeline and
+        // contributed to Kafka lag. SET with EX is also atomic (no key without a TTL).
+        return sessionCommands.set(key, session, new SetArgs().ex(SESSION_TTL))
                 .invoke(() -> LoggingUtil.logDebug(LOG, "save", "Session saved to Redis: %s", session.getSessionId()))
                 .onFailure().invoke(e ->
                         LoggingUtil.logError(LOG, "save", e, "Error saving session to Redis: %s", session.getSessionId()));

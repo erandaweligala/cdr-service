@@ -32,7 +32,7 @@ public class SessionService {
      * Process ACCOUNTING_START event
      */
     public Uni<Void> processStartEvent(AccountingEvent event) {
-        LoggingUtil.logInfo(LOG, "processStartEvent", "Processing START event: %s", event.getEventId());
+        LoggingUtil.logDebug(LOG, "processStartEvent", "Processing START event: %s", event.getEventId());
 
         return Uni.createFrom().item(() -> getUniqueIdFromSessionCDR(event.getPayload().getSession()))
                 .flatMap(uniqueSessionId -> redisRepository.findBySessionId(uniqueSessionId)
@@ -53,7 +53,7 @@ public class SessionService {
                             return addInstanceInfoAndSave(session, event, true, uniqueSessionId)
                                     .chain(() -> elasticsearchService.indexSession(
                                             session, uniqueSessionId, session.getIndexName()))
-                                    .invoke(() -> LoggingUtil.logInfo(LOG, "processStartEvent",
+                                    .invoke(() -> LoggingUtil.logDebug(LOG, "processStartEvent",
                                             "START event processed successfully: %s",
                                             session.getSessionId()));
                         }));
@@ -75,7 +75,7 @@ public class SessionService {
      * Process ACCOUNTING_INTERIM event
      */
     public Uni<Void> processInterimEvent(AccountingEvent event) {
-        LoggingUtil.logInfo(LOG, "processInterimEvent", "Processing INTERIM event: %s", event.getEventId());
+        LoggingUtil.logDebug(LOG, "processInterimEvent", "Processing INTERIM event: %s", event.getEventId());
 
         return Uni.createFrom().item(() -> getUniqueIdFromSessionCDR(event.getPayload().getSession()))
                 .flatMap(uniqueSessionId -> getOrCreateSession(uniqueSessionId, event)
@@ -84,7 +84,7 @@ public class SessionService {
                             return addInstanceInfoAndSave(session, event, true, uniqueSessionId)
                                     .chain(() -> elasticsearchService.indexSession(
                                             session, uniqueSessionId, session.getIndexName()))
-                                    .invoke(() -> LoggingUtil.logInfo(LOG, "processInterimEvent",
+                                    .invoke(() -> LoggingUtil.logDebug(LOG, "processInterimEvent",
                                             "INTERIM event processed successfully: %s",
                                             uniqueSessionId));
                         }));
@@ -94,7 +94,7 @@ public class SessionService {
      * Process ACCOUNTING_STOP event
      */
     public Uni<Void> processStopEvent(AccountingEvent event) {
-        LoggingUtil.logInfo(LOG, "processStopEvent", "Processing STOP event: %s", event.getEventId());
+        LoggingUtil.logDebug(LOG, "processStopEvent", "Processing STOP event: %s", event.getEventId());
 
         return Uni.createFrom().item(() -> getUniqueIdFromSessionCDR(event.getPayload().getSession()))
                 .flatMap(uniqueSessionId -> getOrCreateSession(uniqueSessionId, event)
@@ -104,7 +104,7 @@ public class SessionService {
                                     .chain(() -> elasticsearchService.indexSession(
                                             session, uniqueSessionId, session.getIndexName()))
                                     .chain(() -> redisRepository.delete(uniqueSessionId))
-                                    .invoke(() -> LoggingUtil.logInfo(LOG, "processStopEvent",
+                                    .invoke(() -> LoggingUtil.logDebug(LOG, "processStopEvent",
                                             "STOP event processed successfully: %s",
                                             uniqueSessionId));
                         }));
@@ -114,7 +114,7 @@ public class SessionService {
      * Process COA_REQUEST event
      */
     public Uni<Void> processCoaRequestEvent(AccountingEvent event) {
-        LoggingUtil.logInfo(LOG, "processCoaRequestEvent", "Processing COA REQUEST event: %s", event.getEventId());
+        LoggingUtil.logDebug(LOG, "processCoaRequestEvent", "Processing COA REQUEST event: %s", event.getEventId());
 
         return Uni.createFrom().item(() -> getUniqueIdFromSessionCDR(event.getPayload().getSession()))
                 .flatMap(uniqueSessionId -> getOrCreateSession(uniqueSessionId, event)
@@ -123,7 +123,7 @@ public class SessionService {
                             return addInstanceInfoAndSave(session, event, false, uniqueSessionId)
                                     .chain(() -> elasticsearchService.indexSession(
                                             session, uniqueSessionId, session.getIndexName()))
-                                    .invoke(() -> LoggingUtil.logInfo(LOG, "processCoaRequestEvent",
+                                    .invoke(() -> LoggingUtil.logDebug(LOG, "processCoaRequestEvent",
                                             "COA REQUEST event processed successfully: %s",
                                             uniqueSessionId));
                         }));
@@ -133,7 +133,7 @@ public class SessionService {
      * Process COA_RESPONSE event
      */
     public Uni<Void> processCoaResponseEvent(AccountingEvent event) {
-        LoggingUtil.logInfo(LOG, "processCoaResponseEvent", "Processing COA RESPONSE event: %s", event.getEventId());
+        LoggingUtil.logDebug(LOG, "processCoaResponseEvent", "Processing COA RESPONSE event: %s", event.getEventId());
 
         return Uni.createFrom().item(() -> getUniqueIdFromSessionCDR(event.getPayload().getSession()))
                 .flatMap(uniqueSessionId -> getOrCreateSession(uniqueSessionId, event)
@@ -151,7 +151,7 @@ public class SessionService {
                                         .chain(() -> redisRepository.delete(uniqueSessionId));
                             }
 
-                            return tail.invoke(() -> LoggingUtil.logInfo(LOG, "processCoaResponseEvent",
+                            return tail.invoke(() -> LoggingUtil.logDebug(LOG, "processCoaResponseEvent",
                                     "COA RESPONSE event processed successfully: %s",
                                     uniqueSessionId));
                         }));
