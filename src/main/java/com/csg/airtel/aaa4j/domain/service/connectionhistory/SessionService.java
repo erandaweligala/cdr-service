@@ -1,6 +1,5 @@
 package com.csg.airtel.aaa4j.domain.service.connectionhistory;
 
-import com.csg.airtel.aaa4j.common.DateTimeUtil;
 import com.csg.airtel.aaa4j.common.LoggingUtil;
 import com.csg.airtel.aaa4j.domain.model.connectionhistory.*;
 import com.csg.airtel.aaa4j.domain.util.ResponseCodeEnum;
@@ -10,13 +9,11 @@ import com.csg.airtel.aaa4j.repository.SessionRedisRepository;
 import io.smallrye.mutiny.Uni;
 import jakarta.enterprise.context.ApplicationScoped;
 import org.apache.http.HttpStatus;
-import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
 import java.time.Instant;
-import java.time.LocalDateTime;
-import java.time.ZoneId;
 import java.util.ArrayList;
+import java.util.Date;
 
 @ApplicationScoped
 public class SessionService {
@@ -25,15 +22,10 @@ public class SessionService {
 
     private final SessionRedisRepository redisRepository;
     private final ElasticSearchService elasticsearchService;
-    private final ZoneId deploymentZone;
 
-    public SessionService(
-            SessionRedisRepository redisRepository,
-            ElasticSearchService elasticsearchService,
-            @ConfigProperty(name = "TZ", defaultValue = "UTC") String timezone) {
+    public SessionService(SessionRedisRepository redisRepository, ElasticSearchService elasticsearchService) {
         this.redisRepository = redisRepository;
         this.elasticsearchService = elasticsearchService;
-        this.deploymentZone = ZoneId.of(timezone);
     }
 
     /**
@@ -222,7 +214,6 @@ public class SessionService {
 
     /**
      * Create session from any event type
-     * Uses Instant for all timestamp fields, respecting the deployment zone
      */
     private Session createSession(AccountingEvent event, String uniqueId) {
         Session session = new Session();
@@ -232,9 +223,8 @@ public class SessionService {
         session.setUniqueId(uniqueId);
         session.setIndexName(elasticsearchService.getCurrentIndex());
 
-        Instant rawStartTime = payload.getSession().getStartTime();
-        Instant effectiveStartTime = rawStartTime != null ? rawStartTime : event.getEventTimestamp();
-        session.setStartTime(DateTimeUtil.toLocal(effectiveStartTime, deploymentZone));
+        Instant startTime = payload.getSession().getStartTime();
+        session.setStartTime(startTime != null ? Date.from(startTime) : Date.from(event.getEventTimestamp()));
 
         populateUserInfo(session, payload);
         session.setUsage(getUsageFromPayload(payload));
@@ -276,14 +266,13 @@ public class SessionService {
     private void updateSessionFromStart(Session session, AccountingEvent event) {
         Payload payload = event.getPayload();
 
-        Instant startTime = payload.getSession().getStartTime();
-        if (startTime != null) {
-            session.setStartTime(DateTimeUtil.toLocal(startTime, deploymentZone));
+        if (payload.getSession().getStartTime() != null) {
+            session.setStartTime(Date.from(payload.getSession().getStartTime()));
         }
 
         populateUserInfo(session, payload);
         session.setUsage(getUsageFromPayload(payload));
-        session.setUpdatedTime(DateTimeUtil.toLocal(event.getEventTimestamp(), deploymentZone));
+        session.setUpdatedTime(Date.from(event.getEventTimestamp()));
         session.setConnectionStatus(SessionStatus.ACTIVE);
     }
 
@@ -291,7 +280,7 @@ public class SessionService {
      * Update session from INTERIM event
      */
     private void updateSessionFromInterim(Session session, AccountingEvent event) {
-        session.setUpdatedTime(DateTimeUtil.toLocal(event.getEventTimestamp(), deploymentZone));
+        session.setUpdatedTime(Date.from(event.getEventTimestamp()));
         session.setUsage(getUsageFromPayload(event.getPayload()));
     }
 
@@ -302,9 +291,8 @@ public class SessionService {
         Payload payload = event.getPayload();
 
         Instant sessionEndTime = payload.getSession().getSessionStopTime();
-        Instant effectiveEndTime = sessionEndTime != null ? sessionEndTime : event.getEventTimestamp();
-        session.setEndTime(DateTimeUtil.toLocal(effectiveEndTime, deploymentZone));
-        session.setUpdatedTime(DateTimeUtil.toLocal(event.getEventTimestamp(), deploymentZone));
+        session.setEndTime(sessionEndTime != null ? Date.from(sessionEndTime) : Date.from(event.getEventTimestamp()));
+        session.setUpdatedTime(Date.from(event.getEventTimestamp()));
         session.setUsage(getUsageFromPayload(payload));
         if (session.getConnectionStatus().equals(SessionStatus.TERMINATION_REQUESTED)) {
             session.setConnectionStatus(SessionStatus.TERMINATED);
@@ -320,23 +308,22 @@ public class SessionService {
         Payload payload = event.getPayload();
 
         Instant sessionEndTime = payload.getSession().getSessionStopTime();
-        Instant effectiveEndTime = sessionEndTime != null ? sessionEndTime : event.getEventTimestamp();
-        session.setEndTime(DateTimeUtil.toLocal(effectiveEndTime, deploymentZone));
-        session.setUpdatedTime(DateTimeUtil.toLocal(event.getEventTimestamp(), deploymentZone));
+        session.setEndTime(sessionEndTime != null ? Date.from(sessionEndTime) : Date.from(event.getEventTimestamp()));
+        session.setUpdatedTime(Date.from(event.getEventTimestamp()));
         session.setUsage(getUsageFromPayload(payload));
         session.setConnectionStatus(SessionStatus.IDLE_TIMEOUT);
+
     }
 
     /**
      * Update session from COA event
      */
     private void updateSessionFromCoa(Session session, AccountingEvent event) {
-        session.setUpdatedTime(DateTimeUtil.toLocal(event.getEventTimestamp(), deploymentZone));
+        session.setUpdatedTime(Date.from(event.getEventTimestamp()));
         session.setUsage(getUsageFromPayload(event.getPayload()));
         if (event.getEventType().equalsIgnoreCase(String.valueOf(EventTypes.COA_RESPONSE))) {
             Instant sessionEndTime = event.getPayload().getSession().getSessionStopTime();
-            Instant effectiveEndTime = sessionEndTime != null ? sessionEndTime : event.getEventTimestamp();
-            session.setEndTime(DateTimeUtil.toLocal(effectiveEndTime, deploymentZone));
+            session.setEndTime(sessionEndTime != null ? Date.from(sessionEndTime) : Date.from(event.getEventTimestamp()));
             session.setConnectionStatus(getSessionStatusFromCoaResponse(event.getPayload().getCoa()));
         } else {
             session.setConnectionStatus(SessionStatus.TERMINATION_REQUESTED);
@@ -364,12 +351,11 @@ public class SessionService {
 
     /**
      * Create SessionInstanceInfo from event
-     * Uses Instant directly from the event timestamp
      */
     private SessionInstanceInfo createInstanceInfo(AccountingEvent event) {
         SessionInstanceInfo info = new SessionInstanceInfo();
 
-        info.setDateTime(DateTimeUtil.toLocal(event.getEventTimestamp(), deploymentZone));
+        info.setDateTime(Date.from(event.getEventTimestamp()));
         info.setMessageId(event.getEventId());
         info.setMessageType(event.getEventType());
 
@@ -384,7 +370,4 @@ public class SessionService {
         }
         return info;
     }
-
-
 }
-

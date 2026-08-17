@@ -3,11 +3,6 @@ package com.csg.airtel.aaa4j.domain.client;
 import co.elastic.clients.elasticsearch.ElasticsearchAsyncClient;
 import co.elastic.clients.json.jackson.JacksonJsonpMapper;
 import co.elastic.clients.transport.rest_client.RestClientTransport;
-import com.fasterxml.jackson.annotation.JsonInclude;
-import com.fasterxml.jackson.databind.DeserializationFeature;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.SerializationFeature;
-import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.inject.Produces;
 import jakarta.inject.Singleton;
@@ -95,38 +90,7 @@ public class ElasticsearchProducer {
                 .setConnectionRequestTimeout(connectionRequestTimeoutMs));
 
         RestClient restClient = builder.build();
-        RestClientTransport transport = new RestClientTransport(restClient, new JacksonJsonpMapper(createObjectMapper()));
+        RestClientTransport transport = new RestClientTransport(restClient, new JacksonJsonpMapper());
         return new ElasticsearchAsyncClient(transport);
-    }
-
-    /**
-     * Jackson mapper used by the Elasticsearch transport for both request serialization and
-     * response deserialization.
-     *
-     * <p>The no-arg {@link JacksonJsonpMapper} constructor builds a bare {@code ObjectMapper} with
-     * no JSR-310 support, so every {@code java.time} field on the indexed models (for example
-     * {@code Session.startTime} and {@code SessionInstanceInfo.dateTime}) failed with
-     * "Java 8 date/time type ... not supported by default" — on writes while serializing the update
-     * script params, and on reads while decoding {@code hits.hits[]._source}. Registering
-     * {@link JavaTimeModule} here fixes both directions.
-     *
-     * <p>{@code WRITE_DATES_AS_TIMESTAMPS} is disabled so timestamps are written as ISO-8601
-     * strings rather than numeric epochs: that is what the {@code date} mappings expect and what the
-     * range queries in ConnectionHistoryService compare against (they format bounds with
-     * {@code DateTimeFormatter.ISO_LOCAL_DATE_TIME}).
-     *
-     * <p>The remaining settings preserve the behaviour of the previous default mapper: no indented
-     * output and {@code NON_NULL} inclusion — the latter matters because the append script does
-     * {@code ctx._source.putAll(params.session)}, so emitting nulls would clobber fields already
-     * stored on the document. Unknown properties are ignored so documents written by an older model
-     * version cannot break the search path.
-     */
-    static ObjectMapper createObjectMapper() {
-        return new ObjectMapper()
-                .registerModule(new JavaTimeModule())
-                .disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS)
-                .disable(SerializationFeature.INDENT_OUTPUT)
-                .disable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES)
-                .setSerializationInclusion(JsonInclude.Include.NON_NULL);
     }
 }

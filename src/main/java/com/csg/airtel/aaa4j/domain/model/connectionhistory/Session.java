@@ -5,8 +5,8 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
-import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.Date;
 import java.util.List;
 
 @Data
@@ -16,14 +16,14 @@ import java.util.List;
 public class Session {
     private String uniqueId;
     private String sessionId;
-    private LocalDateTime startTime;
-    private LocalDateTime endTime;
+    private Date startTime;
+    private Date endTime;
     private SessionStatus connectionStatus;
     private Long usage;
     private String userName;
     private String groupId;
-    private LocalDateTime updatedTime;
+    private Date updatedTime;
     private String indexName;
-    @Builder.Default
+    @Builder.Default  // This ensures the list is initialized when using builder
     private List<SessionInstanceInfo> sessionInstances = new ArrayList<>();
 }

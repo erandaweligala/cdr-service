@@ -4,13 +4,13 @@ import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
-import java.time.LocalDateTime;
+import java.util.Date;
 
 @Data
 @AllArgsConstructor
 @NoArgsConstructor
 public class SessionInstanceInfo {
-    private LocalDateTime dateTime;
+    private Date dateTime;
     private String messageId;
     private String messageType;
     private String serviceId;

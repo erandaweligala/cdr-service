@@ -15,7 +15,7 @@ import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
 import java.time.LocalDate;
-import java.time.ZoneId;
+import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -50,8 +50,6 @@ public class ElasticSearchService {
             "if (!dup) { existing.add(params.instance); }" +
             "ctx._source.sessionInstances = existing;";
 
-    private static final DateTimeFormatter INDEX_DATE_SUFFIX = DateTimeFormatter.ofPattern("yyyy.MM.dd");
-
     @Inject
     ElasticsearchAsyncClient elasticsearchClient;
 
@@ -60,9 +58,6 @@ public class ElasticSearchService {
 
     @ConfigProperty(name = "sessions-data")
     String sessionsIndex;
-
-    @ConfigProperty(name = "TZ", defaultValue = "UTC")
-    String timezone;
 
     /**
      * Append one event's instance info to the session document, creating the document on the
@@ -106,16 +101,7 @@ public class ElasticSearchService {
                 .replaceWithVoid();
     }
 
-    /**
-     * Name of the daily index the current event belongs to.
-     *
-     * <p>The suffix is derived in the deployment zone, not UTC, because that is the zone the
-     * timestamps on the document itself are converted to (see {@code SessionService}) and the zone
-     * ConnectionHistoryService uses to expand a requested date range into index names. Deriving it
-     * in UTC instead put documents written either side of local midnight into the neighbouring
-     * day's index, where a search scoped to their own {@code startTime} date could not find them.
-     */
     public String getCurrentIndex() {
-        return sessionsIndex + "-" + LocalDate.now(ZoneId.of(timezone)).format(INDEX_DATE_SUFFIX);
+        return sessionsIndex + "-" + LocalDate.now(ZoneOffset.UTC).format(DateTimeFormatter.ofPattern("yyyy.MM.dd"));
     }
 }

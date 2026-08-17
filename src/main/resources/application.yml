@@ -76,10 +76,6 @@ elasticsearch:
   protocol: http
   username: "${ES_USER}"
   password: "${ES_PASSWORD}"
-  # Pins the mapping of the daily radius-sessions-* indices (date fields stay dates)
-  # instead of letting dynamic mapping infer it from the first document indexed.
-  index-template:
-    enabled: true
   # Connection pool sized for ~2000 TPS workload
   pool:
     max-conn-total: 50
