@@ -3,6 +3,7 @@ package com.csg.airtel.aaa4j.domain.service.connectionhistory;
 import co.elastic.clients.elasticsearch.ElasticsearchAsyncClient;
 import co.elastic.clients.elasticsearch._types.ElasticsearchException;
 import co.elastic.clients.elasticsearch._types.SortOrder;
+import co.elastic.clients.elasticsearch._types.mapping.FieldType;
 import co.elastic.clients.elasticsearch.core.SearchResponse;
 import co.elastic.clients.elasticsearch.core.search.Hit;
 import co.elastic.clients.json.JsonData;
@@ -93,10 +94,22 @@ public class ConnectionHistoryService {
 
                     return Uni.createFrom().completionStage(() -> client.search(s -> s
                                             .index(existingIndices)
+                                            // The indices were filtered for existence above, but a
+                                            // daily index can still be dropped by retention between
+                                            // that check and this search; skip it rather than fail
+                                            // the whole request.
+                                            .ignoreUnavailable(true)
+                                            .allowNoIndices(true)
                                             .from((pageSize * page) - pageSize)
                                             .size(pageSize)
+                                            // unmappedType keeps the sort working across the day
+                                            // boundary: an index created before any session was
+                                            // written to it has no startTime mapping, and without
+                                            // this the sort fails the search on all indices.
                                             .sort(srt -> srt
-                                                    .field(f -> f.field("startTime").order(SortOrder.Desc))
+                                                    .field(f -> f.field("startTime")
+                                                            .order(SortOrder.Desc)
+                                                            .unmappedType(FieldType.Date))
                                             )
                                             .query(q -> q.bool(b -> {
 
