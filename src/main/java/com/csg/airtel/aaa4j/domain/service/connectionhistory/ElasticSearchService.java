@@ -3,6 +3,7 @@ package com.csg.airtel.aaa4j.domain.service.connectionhistory;
 import co.elastic.clients.elasticsearch.ElasticsearchAsyncClient;
 import co.elastic.clients.elasticsearch.core.UpdateRequest;
 import co.elastic.clients.json.JsonData;
+import com.csg.airtel.aaa4j.common.DateTimeUtil;
 import com.csg.airtel.aaa4j.common.LoggingUtil;
 import com.csg.airtel.aaa4j.domain.model.connectionhistory.Session;
 import com.csg.airtel.aaa4j.domain.model.connectionhistory.SessionInstanceInfo;
@@ -15,7 +16,6 @@ import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
 import java.time.LocalDate;
-import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -50,6 +50,8 @@ public class ElasticSearchService {
             "if (!dup) { existing.add(params.instance); }" +
             "ctx._source.sessionInstances = existing;";
 
+    private static final DateTimeFormatter INDEX_DATE_SUFFIX = DateTimeFormatter.ofPattern("yyyy.MM.dd");
+
     @Inject
     ElasticsearchAsyncClient elasticsearchClient;
 
@@ -58,6 +60,9 @@ public class ElasticSearchService {
 
     @ConfigProperty(name = "sessions-data")
     String sessionsIndex;
+
+    @ConfigProperty(name = "app.timezone", defaultValue = "UTC")
+    String timezone;
 
     /**
      * Append one event's instance info to the session document, creating the document on the
@@ -101,7 +106,16 @@ public class ElasticSearchService {
                 .replaceWithVoid();
     }
 
+    /**
+     * Name of the daily index the events being processed now belong to.
+     *
+     * <p>The date suffix is derived in the deployment zone, the same zone the timestamps on those
+     * documents are reported in and the same zone ConnectionHistoryService expands a requested
+     * date range into index names with. Deriving it in UTC instead put a session started either
+     * side of local midnight into the neighbouring day's index, where a search scoped to the date
+     * the console showed for it could not find it.
+     */
     public String getCurrentIndex() {
-        return sessionsIndex + "-" + LocalDate.now(ZoneOffset.UTC).format(DateTimeFormatter.ofPattern("yyyy.MM.dd"));
+        return sessionsIndex + "-" + LocalDate.now(DateTimeUtil.zoneOf(timezone)).format(INDEX_DATE_SUFFIX);
     }
 }

@@ -50,12 +50,16 @@ class ConnectionHistoryServiceTest {
     private static final String START_TIME = "2024-01-01T00:00:00";
     private static final String END_TIME   = "2024-01-31T23:59:59";
 
+    /** UTC+03:00 all year, so a bound read in it differs from the same bound read as UTC. */
+    private static final String DEPLOYMENT_ZONE = "Africa/Nairobi";
+
     private final String sessionsIndex = "test-sessions-index";
 
     @BeforeEach
     void setUp() throws Exception {
         reset(client, handler);
         setPrivateField(service, "sessionsIndex", sessionsIndex);
+        setPrivateField(service, "timezone", "UTC");
     }
 
     // ============ fetchSessionDetails Success Tests ============
@@ -400,13 +404,59 @@ class ConnectionHistoryServiceTest {
     @Test
     void testParseDate_Success() {
         Instant result = service.parseDate("2024-01-15T10:30:00");
-        assertNotNull(result);
+        assertEquals(Instant.parse("2024-01-15T10:30:00Z"), result);
     }
 
     @Test
     void testParseDate_DifferentDate() {
         Instant result = service.parseDate("2025-12-31T23:59:59");
+        assertEquals(Instant.parse("2025-12-31T23:59:59Z"), result);
+    }
+
+    @Test
+    void testParseDate_ReadsBoundInDeploymentTimezone() {
+        setPrivateField(service, "timezone", DEPLOYMENT_ZONE);
+
+        // 10:30 on the console's clock is 07:30 UTC, not 10:30 UTC.
+        assertEquals(Instant.parse("2024-01-15T07:30:00Z"), service.parseDate("2024-01-15T10:30:00"));
+    }
+
+    @Test
+    void testParseDate_AcceptsPlainDateAsStartOfDay() {
+        setPrivateField(service, "timezone", DEPLOYMENT_ZONE);
+
+        assertEquals(Instant.parse("2024-01-14T21:00:00Z"), service.parseDate("2024-01-15"));
+    }
+
+    @Test
+    void testParseDate_HonoursAnExplicitOffset() {
+        setPrivateField(service, "timezone", DEPLOYMENT_ZONE);
+
+        assertEquals(Instant.parse("2024-01-15T10:30:00Z"), service.parseDate("2024-01-15T10:30:00+00:00"));
+    }
+
+    @Test
+    void testParseDate_FallsBackToUtcOnUnknownTimezone() {
+        setPrivateField(service, "timezone", "Not/AZone");
+
+        assertEquals(Instant.parse("2024-01-15T10:30:00Z"), service.parseDate("2024-01-15T10:30:00"));
+    }
+
+    // ============ Default date range Tests ============
+
+    @Test
+    void testFetchSessionDetails_DefaultRangeUsesDeploymentTimezoneDates() {
+        setPrivateField(service, "timezone", DEPLOYMENT_ZONE);
+        stubAllIndicesExist(true);
+        stubSearch(CompletableFuture.completedFuture(createMockSearchResponse(Collections.emptyList(), 0L)));
+
+        BaseResponse<Session> result = service.fetchSessionDetails(
+                null, null, null, null, null, null, 10, 1
+        ).await().indefinitely();
+
         assertNotNull(result);
+        // The default range is the last 8 local days, one index per day.
+        verify(client.indices(), times(8)).exists(any(Function.class));
     }
 
     // ============ logElasticsearchError Coverage Tests ============

@@ -31,6 +31,14 @@ elasticsearch:
     socket-timeout-ms: 60000
     connection-request-timeout-ms: 5000
 
+# Time zone every CDR timestamp is reported in: the startTime/endTime/updatedTime of a session,
+# the dateTime of each of its instances, and the date suffix of the daily index those documents
+# are written to. Timestamps are stored as absolute instants and converted to this zone on the
+# way out, so the session list and the session details show one and the same clock time.
+# Defaults to the pod's TZ, so a deployment that sets TZ needs nothing here.
+app:
+  timezone: "${TZ:UTC}"
+
 sessions-data: radius-sessions
 
 kafka:

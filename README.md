@@ -77,11 +77,37 @@ Easily start your REST Web Services
 
 [Related guide section...](https://quarkus.io/guides/getting-started-reactive#reactive-jax-rs-resources)
 
+## Timestamps and the deployment time zone
+
+Every timestamp the service records is an absolute instant: the `startTime`,
+`endTime` and `updatedTime` of a session, and the `dateTime` of each of its
+instances. An instant carries no time zone of its own, so each place that turns
+one back into a date a person reads has to pick a zone — and they all have to
+pick the same one. That zone is `app.timezone`, which defaults to the pod's `TZ`
+environment variable:
+
+```yaml
+app:
+  timezone: "${TZ:UTC}"
+```
+
+The API converts to it on the way out and serializes an ISO-8601 local
+date-time with no offset (`2026-08-17T20:05:45.967`). Nothing downstream
+re-converts an offset-less timestamp, so the session list and the session
+instance details show the same clock time for the same event. Previously both
+were serialized in UTC (`2026-08-17T17:05:45.967+00:00`) and the admin console
+converted the offset on the list but printed it verbatim on the details, so one
+session read as starting at 20:05 with its own events logged at 17:05.
+
+The same zone reads the `startTime`/`endTime` bounds of a session search, which
+arrive the way they are displayed — offset-less wall-clock times (a plain
+`yyyy-MM-dd` is accepted too, and an explicit offset is honoured as given).
+
 ## Elasticsearch session indices
 
 Session documents are written to one index per day, `radius-sessions-yyyy.MM.dd`,
-named in the deployment timezone (`TZ`) — the same zone the timestamps on the
-document are converted to.
+named in the same zone, so a session belongs to the index for the date the
+console shows it under.
 
 The mapping of those indices is owned by the application: on startup it installs
 the composable index template `radius-sessions-template` (pattern
