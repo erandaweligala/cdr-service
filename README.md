@@ -76,3 +76,50 @@ Create your first JPA entity
 Easily start your REST Web Services
 
 [Related guide section...](https://quarkus.io/guides/getting-started-reactive#reactive-jax-rs-resources)
+
+## Elasticsearch session indices
+
+Session documents are written to one index per day, `radius-sessions-yyyy.MM.dd`,
+named in the deployment timezone (`TZ`) — the same zone the timestamps on the
+document are converted to.
+
+The mapping of those indices is owned by the application: on startup it installs
+the composable index template `radius-sessions-template` (pattern
+`radius-sessions-*`), so each daily index is created with `startTime`, `endTime`,
+`updatedTime` and `sessionInstances.dateTime` mapped as `date`, and with the
+`.keyword` sub-fields the search queries filter on. Without the template the
+mapping is inferred from whichever document happens to be indexed first, which is
+how these fields ended up typed as `long` and produced
+
+```
+document_parsing_exception ... failed to parse field [startTime] of type [long]
+query_shard_exception: failed to create query: For input string: "2026-08-16T00:00:00"
+```
+
+Set `elasticsearch.index-template.enabled=false` if the template is managed
+outside the application.
+
+### Repairing an index that predates the template
+
+A template is applied only when an index is created, so an existing index keeps
+its old mapping — and the type of a field that already exists cannot be changed
+in place. Startup logs an error naming any such index. To repair one, reindex it
+into a new index created from the template:
+
+```shell script
+# 1. create the fixed index from the template
+curl -X PUT "$ES/radius-sessions-2026.08.17-fixed"
+
+# 2. copy the documents, converting the epoch values to the date mapping
+curl -X POST "$ES/_reindex" -H 'Content-Type: application/json' -d '{
+  "source": { "index": "radius-sessions-2026.08.17" },
+  "dest":   { "index": "radius-sessions-2026.08.17-fixed" }
+}'
+
+# 3. swap the name over once the counts match
+curl -X DELETE "$ES/radius-sessions-2026.08.17"
+curl -X POST "$ES/_aliases" -H 'Content-Type: application/json' -d '{
+  "actions": [{ "add": { "index": "radius-sessions-2026.08.17-fixed",
+                         "alias": "radius-sessions-2026.08.17" }}]
+}'
+```

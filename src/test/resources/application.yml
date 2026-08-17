@@ -2,5 +2,8 @@ elasticsearch:
   host: localhost
   username: elastic
   password: changeme
+  # No cluster to talk to in unit tests.
+  index-template:
+    enabled: false
   devservices:
     enabled : false
