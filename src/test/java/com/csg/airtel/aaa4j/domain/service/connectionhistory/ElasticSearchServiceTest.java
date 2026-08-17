@@ -17,6 +17,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.io.IOException;
 import java.time.LocalDate;
+import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
@@ -46,9 +47,13 @@ class ElasticSearchServiceTest {
 
     private static final String BASE_INDEX = "test-sessions-index";
 
+    /** UTC+03:00 all year, so a deployment-zone date differs from the UTC one for three hours a day. */
+    private static final String DEPLOYMENT_ZONE = "Africa/Nairobi";
+
     @BeforeEach
     void setUp() {
         setPrivateField(elasticSearchService, "sessionsIndex", BASE_INDEX);
+        setPrivateField(elasticSearchService, "timezone", "UTC");
 
         testSessionId  = "test-session-123";
         testUniqueId   = "test-session-123-port-5060";
@@ -83,6 +88,26 @@ class ElasticSearchServiceTest {
         assertEquals(expectedPattern, result);
         assertTrue(result.matches("test-sessions-index-\\d{4}\\.\\d{2}\\.\\d{2}"),
                 "Index name should match pattern: base-yyyy.MM.dd");
+    }
+
+    @Test
+    void testGetCurrentIndex_UsesDeploymentTimezone() {
+        setPrivateField(elasticSearchService, "timezone", DEPLOYMENT_ZONE);
+
+        String expected = BASE_INDEX + "-"
+                + LocalDate.now(ZoneId.of(DEPLOYMENT_ZONE)).format(DateTimeFormatter.ofPattern("yyyy.MM.dd"));
+
+        assertEquals(expected, elasticSearchService.getCurrentIndex());
+    }
+
+    @Test
+    void testGetCurrentIndex_FallsBackToUtcOnUnknownTimezone() {
+        setPrivateField(elasticSearchService, "timezone", "Not/AZone");
+
+        String expected = BASE_INDEX + "-"
+                + LocalDate.now(ZoneOffset.UTC).format(DateTimeFormatter.ofPattern("yyyy.MM.dd"));
+
+        assertEquals(expected, elasticSearchService.getCurrentIndex());
     }
 
     @Test
