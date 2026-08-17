@@ -3,7 +3,7 @@
          xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
     <modelVersion>4.0.0</modelVersion>
     <groupId>com.csg.airtel.aaa4j</groupId>
-    <artifactId>cdr-service</artifactId>
+    <artifactId>radius-client</artifactId>
     <version>1.0.0-SNAPSHOT</version>
     <properties>
         <maven.compiler.release>21</maven.compiler.release>
@@ -121,12 +121,6 @@
             <artifactId>quarkus-micrometer-registry-prometheus</artifactId>
         </dependency>
 
-        <!-- Scheduler (used by ExceptionMetricsService for periodic refresh / dedup eviction / daily reset) -->
-        <dependency>
-            <groupId>io.quarkus</groupId>
-            <artifactId>quarkus-scheduler</artifactId>
-        </dependency>
-
         <!-- Test Dependencies -->
         <dependency>
             <groupId>io.quarkus</groupId>
@@ -168,6 +162,12 @@
                 <version>3.24.2</version>
                 <scope>test</scope>
             </dependency>
+
+        <dependency>
+            <groupId>com.csg.airtel.aaa4j</groupId>
+            <artifactId>aaa-metrics-plugin</artifactId>
+            <version>1.2.0</version>
+        </dependency>
         </dependencies>
     <build>
         <plugins>
@@ -249,6 +249,20 @@
             </plugin>
         </plugins>
     </build>
+
+    <distributionManagement>
+        <repository>
+            <id>maven-releases</id>
+            <name>aaa-metrics-plugin</name>
+            <url>http://10.200.140.151:8081/repository/maven-releases</url>
+        </repository>
+    </distributionManagement>
+    <repositories>
+        <repository>
+            <id>maven-releases</id>
+            <url>http://10.200.140.151:8081/repository/maven-releases</url>
+        </repository>
+    </repositories>
 
     <profiles>
         <profile>

@@ -6,6 +6,7 @@ import co.elastic.clients.elasticsearch._types.SortOrder;
 import co.elastic.clients.elasticsearch.core.SearchResponse;
 import co.elastic.clients.elasticsearch.core.search.Hit;
 import co.elastic.clients.json.JsonData;
+import com.csg.airtel.aaa4j.common.DateTimeUtil;
 import com.csg.airtel.aaa4j.common.LoggingUtil;
 import com.csg.airtel.aaa4j.domain.model.BaseResponse;
 import com.csg.airtel.aaa4j.domain.model.PageDetails;
@@ -27,6 +28,7 @@ import org.jspecify.annotations.NonNull;
 
 import java.time.*;
 import java.time.format.DateTimeFormatter;
+import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -46,9 +48,15 @@ public class ConnectionHistoryService {
     @Inject
     Instance<ExceptionMetricsService> metrics;
 
-    public ConnectionHistoryService(ElasticsearchAsyncClient client, ServiceExceptionHandler handler) {
+    private final ZoneId deploymentZone;
+
+    public ConnectionHistoryService(
+            ElasticsearchAsyncClient client,
+            ServiceExceptionHandler handler,
+            @ConfigProperty(name = "TZ", defaultValue = "UTC") String timezone) {
         this.client = client;
         this.handler = handler;
+        this.deploymentZone = ZoneId.of(timezone);
     }
 
     public Uni<BaseResponse<Session>> fetchSessionDetails(
@@ -63,8 +71,8 @@ public class ConnectionHistoryService {
     ) {
         LoggingUtil.logInfo(log, "fetchSessionDetails", "Start fetching session info list.");
 
-        String startTime = startDate != null ? startDate : LocalDate.now().minusDays(7).toString();
-        String endTime = endDate != null ? endDate : LocalDate.now().toString();
+        String startTime = startDate != null ? startDate : LocalDate.now(deploymentZone).minusDays(7).toString();
+        String endTime = endDate != null ? endDate : LocalDate.now(deploymentZone).toString();
 
         List<String> targetIndices = getTargetIndices(startTime, endTime);
 
@@ -80,11 +88,8 @@ public class ConnectionHistoryService {
                         ));
                     }
 
-                    Instant endInstant = LocalDateTime.parse(endTime)
-                            .toLocalDate()
-                            .atTime(23, 59, 59)
-                            .atZone(ZoneId.of("UTC"))
-                            .toInstant();
+                    String startFormatted = parseToStartLocalDateTime(startTime).format(DateTimeUtil.LOCAL_DATE_TIME_FORMATTER);
+                    String endFormatted = parseToEndLocalDateTime(endTime).format(DateTimeUtil.LOCAL_DATE_TIME_FORMATTER);
 
                     return Uni.createFrom().completionStage(() -> client.search(s -> s
                                             .index(existingIndices)
@@ -117,8 +122,8 @@ public class ConnectionHistoryService {
 
                                                 b.filter(filterQ -> filterQ.range(rangeQ -> {
                                                     rangeQ.field("startTime");
-                                                    rangeQ.gte(JsonData.of(parseDate(startTime).toEpochMilli()));
-                                                    rangeQ.lte(JsonData.of(endInstant.toEpochMilli()));
+                                                    rangeQ.gte(JsonData.of(startFormatted));
+                                                    rangeQ.lte(JsonData.of(endFormatted));
                                                     return rangeQ;
                                                 }));
 
@@ -255,29 +260,69 @@ public class ConnectionHistoryService {
         LoggingUtil.logError(log, "logElasticsearchError", null, "=====================================");
     }
 
-    public Instant parseDate(String date){
-        return LocalDateTime
-                .parse(date)
-                .atZone(ZoneId.of("UTC"))
-                .toInstant();
-    }
-
-    private String getSearchIndex() {
-        return sessionsIndex + "-*";
-    }
-
-    private List<String> getTargetIndices(String startTime, String endTime) {
-        LocalDate from = parseDate(startTime).atZone(ZoneOffset.UTC).toLocalDate();
-        LocalDate to   = parseDate(endTime).atZone(ZoneOffset.UTC).toLocalDate();
-
-        List<String> indices = new ArrayList<>();
-        LocalDate current = from;
-        while (!current.isAfter(to)) {
-            indices.add(sessionsIndex + "-" + current.format(DateTimeFormatter.ofPattern("yyyy.MM.dd")));
-            current = current.plusDays(1);
+    /**
+     * Parse an input date string to an Instant representing the start of the interval.
+     * Accepts ISO instant (with zone), ISO local date-time, or ISO date (yyyy-MM-dd).
+     * If the input is null, returns start of day for (now - 7 days) in UTC.
+     */
+    public Instant parseToStartInstant(String date) {
+        if (date == null) {
+            return LocalDate.now().minusDays(7).atStartOfDay(ZoneOffset.UTC).toInstant();
         }
-        return indices;
+        try {
+            return Instant.parse(date);
+        } catch (DateTimeParseException ignored) {
+        }
+        try {
+            LocalDateTime ldt = LocalDateTime.parse(date);
+            return ldt.atZone(ZoneOffset.UTC).toInstant();
+        } catch (DateTimeParseException ignored) {
+        }
+        try {
+            LocalDate ld = LocalDate.parse(date);
+            return ld.atStartOfDay(ZoneOffset.UTC).toInstant();
+        } catch (DateTimeParseException e) {
+            throw new BaseException(
+                    "Invalid date format: " + date,
+                    ResponseCodeEnum.EXCEPTION_SERVICE_LAYER.description(),
+                    HttpStatus.SC_BAD_REQUEST,
+                    ResponseCodeEnum.EXCEPTION_SERVICE_LAYER.code()
+            );
+        }
     }
+
+    /**
+     * Parse an input date string to an Instant representing the end of the interval (23:59:59 UTC).
+     * Accepts ISO instant (with zone), ISO local date-time, or ISO date (yyyy-MM-dd).
+     * If the input is null, returns end of today in UTC.
+     */
+    public Instant parseToEndInstant(String date) {
+        if (date == null) {
+            return LocalDate.now().atTime(23, 59, 59).atZone(ZoneOffset.UTC).toInstant();
+        }
+        try {
+            return Instant.parse(date);
+        } catch (DateTimeParseException ignored) {
+        }
+        try {
+            LocalDateTime ldt = LocalDateTime.parse(date);
+            // if a time was provided, use it; otherwise, caller's string included time portion
+            return ldt.atZone(ZoneOffset.UTC).toInstant();
+        } catch (DateTimeParseException ignored) {
+        }
+        try {
+            LocalDate ld = LocalDate.parse(date);
+            return ld.atTime(23, 59, 59).atZone(ZoneOffset.UTC).toInstant();
+        } catch (DateTimeParseException e) {
+            throw new BaseException(
+                    "Invalid date format: " + date,
+                    ResponseCodeEnum.EXCEPTION_SERVICE_LAYER.description(),
+                    HttpStatus.SC_BAD_REQUEST,
+                    ResponseCodeEnum.EXCEPTION_SERVICE_LAYER.code()
+            );
+        }
+    }
+
 
     private Uni<List<String>> filterExistingIndices(List<String> indices) {
         if (indices.isEmpty()) {
@@ -302,4 +347,84 @@ public class ConnectionHistoryService {
                 .filter(Objects::nonNull)
                 .collect().asList();
     }
+
+    /**
+     * Parse an input date string to the start-of-range LocalDateTime, in the pod's
+     * deployment zone. Accepts a zoned Instant string (converted via deploymentZone),
+     * an already-zone-less LocalDateTime string, or a plain date (start of day).
+     */
+    public LocalDateTime parseToStartLocalDateTime(String date) {
+        if (date == null) {
+            return LocalDate.now(deploymentZone).minusDays(7).atStartOfDay();
+        }
+        try {
+            return DateTimeUtil.toLocal(Instant.parse(date), deploymentZone);
+        } catch (DateTimeParseException ignored) {
+        }
+        try {
+            return LocalDateTime.parse(date);
+        } catch (DateTimeParseException ignored) {
+        }
+        try {
+            return LocalDate.parse(date).atStartOfDay();
+        } catch (DateTimeParseException e) {
+            throw new BaseException(
+                    "Invalid date format: " + date,
+                    ResponseCodeEnum.EXCEPTION_SERVICE_LAYER.description(),
+                    HttpStatus.SC_BAD_REQUEST,
+                    ResponseCodeEnum.EXCEPTION_SERVICE_LAYER.code()
+            );
+        }
+    }
+
+    /**
+     * Parse an input date string to the end-of-range LocalDateTime (23:59:59),
+     * in the pod's deployment zone.
+     */
+    public LocalDateTime parseToEndLocalDateTime(String date) {
+        if (date == null) {
+            return LocalDate.now(deploymentZone).atTime(23, 59, 59);
+        }
+        try {
+            return DateTimeUtil.toLocal(Instant.parse(date), deploymentZone);
+        } catch (DateTimeParseException ignored) {
+        }
+        try {
+            return LocalDateTime.parse(date);
+        } catch (DateTimeParseException ignored) {
+        }
+        try {
+            return LocalDate.parse(date).atTime(23, 59, 59);
+        } catch (DateTimeParseException e) {
+            throw new BaseException(
+                    "Invalid date format: " + date,
+                    ResponseCodeEnum.EXCEPTION_SERVICE_LAYER.description(),
+                    HttpStatus.SC_BAD_REQUEST,
+                    ResponseCodeEnum.EXCEPTION_SERVICE_LAYER.code()
+            );
+        }
+    }
+
+    // Backwards-compatible alias used by some tests / callers
+    public LocalDateTime parseDate(String date) {
+        return parseToStartLocalDateTime(date);
+    }
+
+    private String getSearchIndex() {
+        return sessionsIndex + "-*";
+    }
+
+    private List<String> getTargetIndices(String startTime, String endTime) {
+        LocalDate from = parseToStartLocalDateTime(startTime).toLocalDate();
+        LocalDate to   = parseToEndLocalDateTime(endTime).toLocalDate();
+
+        List<String> indices = new ArrayList<>();
+        LocalDate current = from;
+        while (!current.isAfter(to)) {
+            indices.add(sessionsIndex + "-" + current.format(DateTimeFormatter.ofPattern("yyyy.MM.dd")));
+            current = current.plusDays(1);
+        }
+        return indices;
+    }
+
 }

@@ -69,7 +69,6 @@ public class AccountingKafkaConsumer {
                                 ExceptionMetricsService.Layer.PRODUCER,
                                 ExceptionMetricsService.Source.KAFKA);
                     }
-                    // if retry needed, propagate failure instead
                     return null;
                 })
                 .eventually(this::clearMdcContext);
@@ -103,6 +102,8 @@ public class AccountingKafkaConsumer {
 
             case "COA_RESPONSE" ->
                     sessionService.processCoaResponseEvent(event);
+            case "IDLE_TIMEOUT_STOP" ->
+                    sessionService.processIdleTimeoutEvent(event);
 
             default -> {
                 LoggingUtil.logWarn(LOG, "processEvent", "Unknown event type: %s", eventType);

@@ -79,7 +79,6 @@ public class LoggingUtil {
      * Build the structured log message in a single pass using a pooled StringBuilder.
      * Avoids String.format() (regex parsing + Formatter allocation) and avoids a fresh
      * StringBuilder allocation on every call — critical at 3500 TPS.
-     *
      * Format: [method]message-with-substituted-args
      * Supports %s and %d placeholders; %% emits a literal %.
      */
