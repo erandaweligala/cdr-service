@@ -82,6 +82,7 @@ public class ExceptionMetricsService {
     public enum Source {
         KAFKA("kafka"),
         ELASTICSEARCH("elasticsearch"),
+        REDIS("redis"),
         INTERNAL("internal"),
         UNKNOWN("unknown");
 
@@ -97,6 +98,7 @@ public class ExceptionMetricsService {
     }
 
     private final MeterRegistry registry;
+    private final ConnectivityMonitoringService connectivityMonitoringService;
 
     /** exceptionType -> Counter[layer.ordinal()][source.ordinal()] — avoids per-call key concatenation. */
     private final ConcurrentMap<String, Counter[][]> perLayerCounters = new ConcurrentHashMap<>();
@@ -113,8 +115,10 @@ public class ExceptionMetricsService {
     private MultiGauge percentageGauge;
 
     @Inject
-    public ExceptionMetricsService(MeterRegistry registry) {
+    public ExceptionMetricsService(MeterRegistry registry,
+                                   ConnectivityMonitoringService connectivityMonitoringService) {
         this.registry = registry;
+        this.connectivityMonitoringService = connectivityMonitoringService;
     }
 
     @PostConstruct
@@ -164,9 +168,39 @@ public class ExceptionMetricsService {
             }
 
             incrementCounters(type, layer, src);
+            forwardToConnectivityMonitor(root, src);
         } catch (Exception e) {
             LoggingUtil.logWarn(LOG, "recordException", "Failed to record exception metric: %s", e.getMessage());
         }
+    }
+
+    /**
+     * Routes exceptions raised against an infrastructure dependency to
+     * {@link ConnectivityMonitoringService}, which decides whether they represent a
+     * connectivity fault and drives the {@code dependency_up} state machine.
+     *
+     * <p>Forwarding happens after this service's own dedup checks, so a root cause that
+     * bubbles up through several layers, or is retried, counts as one observation here
+     * and one there.</p>
+     */
+    private void forwardToConnectivityMonitor(Throwable root, Source source) {
+        if (connectivityMonitoringService == null) {
+            return;
+        }
+        ConnectivityMonitoringService.Dependency dependency = toDependency(source);
+        if (dependency != null) {
+            connectivityMonitoringService.recordFailure(dependency, root);
+        }
+    }
+
+    /** Maps an exception source onto the dependency it belongs to, or {@code null} if it is not one. */
+    private static ConnectivityMonitoringService.Dependency toDependency(Source source) {
+        return switch (source) {
+            case REDIS -> ConnectivityMonitoringService.Dependency.REDIS;
+            case KAFKA -> ConnectivityMonitoringService.Dependency.KAFKA;
+            case ELASTICSEARCH -> ConnectivityMonitoringService.Dependency.ELASTICSEARCH;
+            default -> null;
+        };
     }
 
     private void incrementCounters(String type, Layer layer, Source source) {
