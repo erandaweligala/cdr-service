@@ -5,13 +5,13 @@ import com.csg.airtel.aaa4j.domain.model.connectionhistory.*;
 import com.csg.airtel.aaa4j.domain.util.ResponseCodeEnum;
 import com.csg.airtel.aaa4j.domain.util.exceptions.BaseException;
 import com.csg.airtel.aaa4j.repository.SessionRedisRepository;
-
 import io.smallrye.mutiny.Uni;
 import jakarta.enterprise.context.ApplicationScoped;
 import org.apache.http.HttpStatus;
 import org.jboss.logging.Logger;
 
 import java.time.Instant;
+import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.Date;
 
@@ -76,10 +76,12 @@ public class SessionService {
         LoggingUtil.logDebug(LOG, "processInterimEvent", "Processing INTERIM event: %s", event.getEventId());
 
         return Uni.createFrom().item(() -> getUniqueIdFromSessionCDR(event.getPayload().getSession()))
-                .flatMap(uniqueSessionId -> getOrCreateSession(uniqueSessionId, event)
-                        .flatMap(session -> {
+                .flatMap(uniqueSessionId -> getOrCreateSessionTrackingUsage(uniqueSessionId, event)
+                        .flatMap(lookup -> {
+                            Session session = lookup.session();
                             updateSessionFromInterim(session, event);
-                            return saveAndAppend(session, event, uniqueSessionId, true)
+                            Long instanceUsage = computeInstanceUsage(lookup.previousUsage(), session.getUsage(), event.getPayload());
+                            return saveAndAppend(session, event, uniqueSessionId, true, instanceUsage)
                                     .invoke(() -> LoggingUtil.logDebug(LOG, "processInterimEvent",
                                             "INTERIM event processed successfully: %s",
                                             uniqueSessionId));
@@ -93,10 +95,12 @@ public class SessionService {
         LoggingUtil.logDebug(LOG, "processStopEvent", "Processing STOP event: %s", event.getEventId());
 
         return Uni.createFrom().item(() -> getUniqueIdFromSessionCDR(event.getPayload().getSession()))
-                .flatMap(uniqueSessionId -> getOrCreateSession(uniqueSessionId, event)
-                        .flatMap(session -> {
+                .flatMap(uniqueSessionId -> getOrCreateSessionTrackingUsage(uniqueSessionId, event)
+                        .flatMap(lookup -> {
+                            Session session = lookup.session();
                             updateSessionFromStop(session, event);
-                            return saveAndAppend(session, event, uniqueSessionId, false)
+                            Long instanceUsage = computeInstanceUsage(lookup.previousUsage(), session.getUsage(), event.getPayload());
+                            return saveAndAppend(session, event, uniqueSessionId, false, instanceUsage)
                                     .chain(() -> redisRepository.delete(uniqueSessionId))
                                     .invoke(() -> LoggingUtil.logDebug(LOG, "processStopEvent",
                                             "STOP event processed successfully: %s",
@@ -213,6 +217,54 @@ public class SessionService {
     }
 
     /**
+     * Pairs a looked-up (or freshly created) session with the cumulative usage it held
+     * BEFORE this event is applied, so callers can derive a per-event usage delta.
+     * previousUsage is 0 for a newly created session (cache miss), since there is no
+     * prior cumulative value to diff against.
+     */
+    private record SessionLookup(Session session, long previousUsage) {}
+
+    private Uni<SessionLookup> getOrCreateSessionTrackingUsage(String sessionId, AccountingEvent event) {
+        return redisRepository.findBySessionId(sessionId)
+                .map(existing -> {
+                    if (existing.isPresent()) {
+                        Session session = existing.get();
+                        long previousUsage = session.getUsage() != null ? session.getUsage() : 0L;
+                        return new SessionLookup(session, previousUsage);
+                    }
+                    LoggingUtil.logWarn(LOG, "getOrCreateSessionTrackingUsage",
+                            "Session not found for %s event: %s, creating new session",
+                            event.getEventType(), sessionId);
+                    return new SessionLookup(createSession(event, sessionId), 0L);
+                });
+    }
+
+    /**
+     * Compute this event's session-instance usage as the delta between the new cumulative
+     * totalUsage and the previously stored session.usage. Falls back to the payload's own
+     * sessionUsage when the delta would be negative (e.g. an upstream counter rollback) since
+     * a negative usage figure cannot be trusted.
+     */
+    private Long computeInstanceUsage(long previousUsage, Long newTotalUsage, Payload payload) {
+        long currentUsage = newTotalUsage != null ? newTotalUsage : 0L;
+        long delta = currentUsage - previousUsage;
+        if (delta < 0) {
+            LoggingUtil.logWarn(LOG, "computeInstanceUsage",
+                    "Negative usage delta detected (previousUsage=%d, newTotalUsage=%d); falling back to payload sessionUsage",
+                    previousUsage, currentUsage);
+            return getSessionUsageFromPayload(payload);
+        }
+        return delta;
+    }
+
+    /**
+     * Get the per-instance session usage reported directly by the payload, return 0 if not available
+     */
+    private Long getSessionUsageFromPayload(Payload payload) {
+        return (payload.getAccounting() != null) ? payload.getAccounting().getSessionUsage() : 0L;
+    }
+
+    /**
      * Create session from any event type
      */
     private Session createSession(AccountingEvent event, String uniqueId) {
@@ -250,7 +302,17 @@ public class SessionService {
      * every event — the bottleneck that let Kafka lag build at high TPS.
      */
     private Uni<Void> saveAndAppend(Session session, AccountingEvent event, String uniqueSessionId, boolean saveToRedis) {
-        SessionInstanceInfo instanceInfo = createInstanceInfo(event);
+        return saveAndAppend(session, event, uniqueSessionId, saveToRedis, null);
+    }
+
+    /**
+     * Same as {@link #saveAndAppend(Session, AccountingEvent, String, boolean)}, but lets the
+     * caller override the per-event session-instance usage (e.g. with a locally computed delta)
+     * instead of trusting the payload's own sessionUsage field. Pass null to keep default behavior.
+     */
+    private Uni<Void> saveAndAppend(Session session, AccountingEvent event, String uniqueSessionId,
+                                     boolean saveToRedis, Long instanceUsageOverride) {
+        SessionInstanceInfo instanceInfo = createInstanceInfo(event, instanceUsageOverride);
 
         Uni<Void> redisSave = saveToRedis
                 ? redisRepository.save(session, uniqueSessionId)
@@ -352,7 +414,7 @@ public class SessionService {
     /**
      * Create SessionInstanceInfo from event
      */
-    private SessionInstanceInfo createInstanceInfo(AccountingEvent event) {
+    private SessionInstanceInfo createInstanceInfo(AccountingEvent event, Long instanceUsageOverride) {
         SessionInstanceInfo info = new SessionInstanceInfo();
 
         info.setDateTime(Date.from(event.getEventTimestamp()));
@@ -361,7 +423,7 @@ public class SessionService {
 
         if (event.getPayload().getAccounting() != null) {
             Accounting accounting = event.getPayload().getAccounting();
-            info.setUsage(accounting.getSessionUsage());
+            info.setUsage(instanceUsageOverride != null ? instanceUsageOverride : accounting.getSessionUsage());
             info.setServiceId(accounting.getServiceId());
             info.setBucketId(accounting.getBucketId());
         } else {

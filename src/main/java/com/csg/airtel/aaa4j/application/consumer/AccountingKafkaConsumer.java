@@ -81,6 +81,9 @@ public class AccountingKafkaConsumer {
 
         String eventType = event.getEventType();
 
+        LoggingUtil.logInfo(LOG,"processEvent","Received cdr request for event type: %s, session usage: %s, total usage: %s",
+                eventType,event.getPayload().getAccounting().getSessionUsage(),event.getPayload().getAccounting().getTotalUsage());
+
         if (eventType == null) {
             handleInvalidEventType(event);
             return Uni.createFrom().voidItem();
