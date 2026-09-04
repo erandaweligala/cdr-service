@@ -216,9 +216,12 @@ mp:
       airtel-accounting-events:
         connector: smallrye-kafka
         topic: "${airtel.kafka.topic}"
-        bootstrap.servers: "${airtel.kafka.bootstrap-servers}"
-        key.serializer: org.apache.kafka.common.serialization.StringSerializer
-        value.serializer: io.quarkus.kafka.client.serialization.ObjectMapperSerializer
+        bootstrap:
+          servers: "${airtel.kafka.bootstrap-servers}"
+        key:
+          serializer: org.apache.kafka.common.serialization.StringSerializer
+        value:
+          serializer: io.quarkus.kafka.client.serialization.ObjectMapperSerializer
         # Forwarding must never gate CDR processing, so the Airtel broker is deliberately kept out
         # of the service's health checks: an outage there is logged and counted (layer=producer,
         # source=kafka) but leaves the pod ready and the consumers running.
@@ -226,12 +229,24 @@ mp:
         acks: "1"
         # Batch a few milliseconds' worth of records instead of one request per event; at ~2000 TPS
         # this is the difference between a handful of requests and thousands per second.
-        linger.ms: 5
-        batch.size: 65536
-        buffer.memory: 33554432
-        request.timeout.ms: 30000
-        delivery.timeout.ms: 120000
-        max.in.flight.requests.per.connection: 5
+        linger:
+          ms: 5
+        batch:
+          size: 65536
+        buffer:
+          memory: 33554432
+        request:
+          timeout:
+            ms: 30000
+        delivery:
+          timeout:
+            ms: 120000
+        max:
+          in:
+            flight:
+              requests:
+                per:
+                  connection: 5
         close-timeout: 30000
 
 # Dependency connectivity monitoring (Redis / Kafka / Elasticsearch)
