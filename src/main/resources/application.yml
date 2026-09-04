@@ -118,51 +118,96 @@ mp:
       accounting-cdr-events:
         connector: smallrye-kafka
         topic: cdr-event-dc
-        group.id: cdr-service
-        # Process partitions concurrently while preserving in-partition (per-session-key)
-        # ordering. Without this the channel processes one record at a time, awaiting the
-        # full Redis+Elasticsearch round-trip chain per event, which caps throughput well
-        # below 2000 TPS and lets Kafka lag accumulate.
-        #
-        # Sizing: concurrency creates this many independent Kafka consumer clients PER POD,
-        # each with its own fetch buffers. Topic has 21 partitions over 7 pods (1 core /
-        # 2 GB each) sharing group.id=cdr-service => 3 partitions/pod. concurrency=3 gives
-        # one partition per lane with no idle consumers and bounded memory. Raising it above
-        # partitions-per-pod only wastes threads/buffers. Keep concurrency = partitions / pods.
-        concurrency: 3
-        value.deserializer: io.quarkus.kafka.client.serialization.ObjectMapperDeserializer
-        key.deserializer: org.apache.kafka.common.serialization.StringDeserializer
-        auto.offset.reset: earliest
-        enable.auto.commit: true
-        max.poll.records: 500
-        max.poll.interval.ms: 300000
-        session.timeout.ms: 30000
-        fetch.min.bytes: 1024
-        fetch.max.bytes: 52428800
-        max.partition.fetch.bytes: 10485760
-        receive.buffer.bytes: 65536
+        group:
+          id: cdr-service
+        value:
+          deserializer: io.quarkus.kafka.client.serialization.ObjectMapperDeserializer
+        key:
+          deserializer: org.apache.kafka.common.serialization.StringDeserializer
+        auto:
+          offset:
+            reset: earliest
+        enable:
+          auto:
+            commit: false
+        max:
+          poll:
+            records: 500
+            interval:
+              ms: 30000
+          partition:
+            fetch:
+              bytes: 1048576
+        poll-timeout: 5000
+        session:
+          timeout:
+            ms: 30000
+        heartbeat:
+          interval:
+            ms: 10000
+        fetch:
+          min:
+            bytes: 1
+          max:
+            bytes: 10485760
+        receive:
+          buffer:
+            bytes: 65536
+        connections:
+          max:
+            idle:
+              ms: 540000
         failure-strategy: ignore
-        close-timeout: 30000
+        # Process partitions concurrently while preserving in-partition (per-session-key)
+        # ordering. Each lane is an independent Kafka consumer client in group.id above, so a
+        # pod only uses as many lanes as it is assigned partitions; the rest stay idle.
+        concurrency: 6
 
       accounting-cdr-events-mirror:
         connector: smallrye-kafka
-        topic: dc.cdr-event-dr
-        group.id: cdr-service
-        # See accounting-cdr-events: concurrency = partitions(21) / pods(7) = 3 per pod.
-        concurrency: 3
-        value.deserializer: io.quarkus.kafka.client.serialization.ObjectMapperDeserializer
-        key.deserializer: org.apache.kafka.common.serialization.StringDeserializer
-        auto.offset.reset: earliest
-        enable.auto.commit: true
-        max.poll.records: 500
-        max.poll.interval.ms: 300000
-        session.timeout.ms: 30000
-        fetch.min.bytes: 1024
-        fetch.max.bytes: 52428800
-        max.partition.fetch.bytes: 10485760
-        receive.buffer.bytes: 65536
+        topic: dr.cdr-event-dr
+        group:
+          id: cdr-service-mirror
+        value:
+          deserializer: io.quarkus.kafka.client.serialization.ObjectMapperDeserializer
+        key:
+          deserializer: org.apache.kafka.common.serialization.StringDeserializer
+        auto:
+          offset:
+            reset: earliest
+        enable:
+          auto:
+            commit: false
+        max:
+          poll:
+            records: 500
+            interval:
+              ms: 30000
+          partition:
+            fetch:
+              bytes: 1048576
+        poll-timeout: 5000
+        session:
+          timeout:
+            ms: 30000
+        heartbeat:
+          interval:
+            ms: 10000
+        fetch:
+          min:
+            bytes: 1
+          max:
+            bytes: 10485760
+        receive:
+          buffer:
+            bytes: 65536
+        connections:
+          max:
+            idle:
+              ms: 540000
         failure-strategy: ignore
-        close-timeout: 30000
+        # See accounting-cdr-events.
+        concurrency: 6
 
     outgoing:
       # Airtel's copy of the CDR stream. Every consumed AccountingEvent is republished here
