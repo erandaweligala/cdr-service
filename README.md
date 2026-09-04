@@ -103,6 +103,43 @@ The same zone reads the `startTime`/`endTime` bounds of a session search, which
 arrive the way they are displayed — offset-less wall-clock times (a plain
 `yyyy-MM-dd` is accepted too, and an explicit offset is honoured as given).
 
+## Forwarding events to the Airtel topic
+
+Every `AccountingEvent` the service consumes is republished, unchanged, to the
+Airtel Kafka topic. The format is the consumed one: the same `AccountingEvent`
+object is handed to the outgoing channel, which serializes it with the same
+application `ObjectMapper` the incoming channel deserialized it with, so no
+field is added, dropped or renamed. The record key is the consumed record's own
+key, so events keep their partition — and with it their per-session order —
+falling back to the event's `partitionKey` and then its `eventId` when the
+consumed record carries no key.
+
+The forward is unconditional. It is started before the event is routed and runs
+independently of it, so an event reaches the topic whatever its `eventType`
+(including one the router does not handle, or none at all) and whatever happens
+downstream — a Redis or Elasticsearch outage, a malformed payload, any
+exception at all. It also runs concurrently with processing, so the round trip
+to the Airtel broker does not add to the per-event latency.
+
+The traffic is one way: a failure to publish is logged and counted as a
+`producer`/`kafka` exception on the error dashboards, but it never fails an
+event or stalls a consumer, and the Airtel broker is deliberately left out of
+the service's health checks so an outage there cannot take the pod out of
+service. A broker that stops answering altogether is waited on for
+`publish-timeout-ms` at most — past that the consumer moves on while the record
+stays queued in the producer, which still delivers it once the broker returns.
+
+The cluster, the topic and that wait are configurable, and the cluster defaults
+to the one the events are consumed from:
+
+```yaml
+airtel:
+  kafka:
+    bootstrap-servers: "${AIRTEL_KAFKA_BOOTSTRAP_SERVERS:kafka-headless.cluster-dc.svc.cluster.local:9092}"
+    topic: "${AIRTEL_KAFKA_TOPIC:cdr-event-airtel}"
+    publish-timeout-ms: "${AIRTEL_KAFKA_PUBLISH_TIMEOUT_MS:10000}"
+```
+
 ## Elasticsearch session indices
 
 Session documents are written to one index per day, `radius-sessions-yyyy.MM.dd`,
