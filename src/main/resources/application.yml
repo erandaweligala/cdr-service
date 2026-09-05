@@ -121,7 +121,7 @@ mp:
         group:
           id: cdr-service
         value:
-          deserializer: io.quarkus.kafka.client.serialization.ObjectMapperDeserializer
+          deserializer: com.csg.airtel.aaa4j.application.consumer.AccountingEventDeserializer
         key:
           deserializer: org.apache.kafka.common.serialization.StringDeserializer
         auto:
@@ -169,7 +169,7 @@ mp:
         group:
           id: cdr-service-mirror
         value:
-          deserializer: io.quarkus.kafka.client.serialization.ObjectMapperDeserializer
+          deserializer: com.csg.airtel.aaa4j.application.consumer.AccountingEventDeserializer
         key:
           deserializer: org.apache.kafka.common.serialization.StringDeserializer
         auto:

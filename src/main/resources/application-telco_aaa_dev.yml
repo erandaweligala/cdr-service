@@ -69,7 +69,7 @@ mp:
         # concurrency = partitions(21) / pods(7) = 3 per pod; one Kafka consumer per
         # partition, no idle lanes, bounded fetch-buffer memory on a 1 core / 2 GB pod.
         concurrency: 3
-        value.deserializer: io.quarkus.kafka.client.serialization.ObjectMapperDeserializer
+        value.deserializer: com.csg.airtel.aaa4j.application.consumer.AccountingEventDeserializer
         key.deserializer: org.apache.kafka.common.serialization.StringDeserializer
         auto.offset.reset: earliest
         enable.auto.commit: true
