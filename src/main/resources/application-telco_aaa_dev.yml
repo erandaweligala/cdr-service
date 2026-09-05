@@ -63,23 +63,42 @@ mp:
       accounting-cdr-events:
         connector: smallrye-kafka
         topic: cdr-event
-        group.id: accounting-service
+        group:
+          id: accounting-service
         # Concurrent per-partition processing (preserves in-partition ordering) so the
         # consumer keeps up with ~2000 TPS instead of processing one record at a time.
         # concurrency = partitions(21) / pods(7) = 3 per pod; one Kafka consumer per
         # partition, no idle lanes, bounded fetch-buffer memory on a 1 core / 2 GB pod.
         concurrency: 3
-        value.deserializer: com.csg.airtel.aaa4j.application.consumer.AccountingEventDeserializer
-        key.deserializer: org.apache.kafka.common.serialization.StringDeserializer
-        auto.offset.reset: earliest
-        enable.auto.commit: true
-        max.poll.records: 500
-        max.poll.interval.ms: 300000
-        session.timeout.ms: 30000
-        fetch.min.bytes: 1024
-        fetch.max.bytes: 52428800
-        max.partition.fetch.bytes: 10485760
-        receive.buffer.bytes: 65536
+        value:
+          deserializer: com.csg.airtel.aaa4j.application.consumer.AccountingEventDeserializer
+        key:
+          deserializer: org.apache.kafka.common.serialization.StringDeserializer
+        auto:
+          offset:
+            reset: earliest
+        enable:
+          auto:
+            commit: true
+        max:
+          poll:
+            records: 500
+            interval:
+              ms: 300000
+          partition:
+            fetch:
+              bytes: 10485760
+        session:
+          timeout:
+            ms: 30000
+        fetch:
+          min:
+            bytes: 1024
+          max:
+            bytes: 52428800
+        receive:
+          buffer:
+            bytes: 65536
         failure-strategy: ignore
         close-timeout: 30000
 
@@ -90,9 +109,12 @@ mp:
       airtel-accounting-events:
         connector: smallrye-kafka
         topic: "${airtel.kafka.topic}"
-        bootstrap.servers: "${airtel.kafka.bootstrap-servers}"
-        key.serializer: org.apache.kafka.common.serialization.StringSerializer
-        value.serializer: io.quarkus.kafka.client.serialization.ObjectMapperSerializer
+        bootstrap:
+          servers: "${airtel.kafka.bootstrap-servers}"
+        key:
+          serializer: org.apache.kafka.common.serialization.StringSerializer
+        value:
+          serializer: io.quarkus.kafka.client.serialization.ObjectMapperSerializer
         # Forwarding must never gate CDR processing, so the Airtel broker is deliberately kept out
         # of the service's health checks: an outage there is logged and counted (layer=producer,
         # source=kafka) but leaves the pod ready and the consumers running.
@@ -100,10 +122,22 @@ mp:
         acks: "1"
         # Batch a few milliseconds' worth of records instead of one request per event; at ~2000 TPS
         # this is the difference between a handful of requests and thousands per second.
-        linger.ms: 5
-        batch.size: 65536
-        buffer.memory: 33554432
-        request.timeout.ms: 30000
-        delivery.timeout.ms: 120000
-        max.in.flight.requests.per.connection: 5
+        linger:
+          ms: 5
+        batch:
+          size: 65536
+        buffer:
+          memory: 33554432
+        request:
+          timeout:
+            ms: 30000
+        delivery:
+          timeout:
+            ms: 120000
+        max:
+          in:
+            flight:
+              requests:
+                per:
+                  connection: 5
         close-timeout: 30000
