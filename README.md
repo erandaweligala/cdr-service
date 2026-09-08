@@ -105,21 +105,42 @@ arrive the way they are displayed — offset-less wall-clock times (a plain
 
 ## Forwarding events to the Airtel topic
 
-Every `AccountingEvent` the service consumes is republished, unchanged, to the
-Airtel Kafka topic. The format is the consumed one: the same `AccountingEvent`
-object is handed to the outgoing channel, which serializes it with the same
-application `ObjectMapper` the incoming channel deserialized it with, so no
-field is added, dropped or renamed. The record key is the consumed record's own
+Every `AccountingEvent` the service consumes **from its own zone's CDR topic**
+is republished, unchanged, to the Airtel Kafka topic. The format is the consumed
+one: the same `AccountingEvent` object is handed to the outgoing channel, which
+serializes it with the same application `ObjectMapper` the incoming channel
+deserialized it with, so no field is added, dropped or renamed. The record key is the consumed record's own
 key, so events keep their partition — and with it their per-session order —
 falling back to the event's `partitionKey` and then its `eventId` when the
 consumed record carries no key.
 
-The forward is unconditional. It is started before the event is routed and runs
-independently of it, so an event reaches the topic whatever its `eventType`
-(including one the router does not handle, or none at all) and whatever happens
-downstream — a Redis or Elasticsearch outage, a malformed payload, any
-exception at all. It also runs concurrently with processing, so the round trip
-to the Airtel broker does not add to the per-event latency.
+Within that channel the forward is unconditional. It is started before the event
+is routed and runs independently of it, so an event reaches the topic whatever
+its `eventType` (including one the router does not handle, or none at all) and
+whatever happens downstream — a Redis or Elasticsearch outage, a malformed
+payload, any exception at all. It also runs concurrently with processing, so the
+round trip to the Airtel broker does not add to the per-event latency.
+
+### Mirrored CDRs are not forwarded
+
+The service consumes two CDR streams: `accounting-cdr-events`, this zone's own
+topic, and `accounting-cdr-events-mirror`, the peer zone's topic replicated here
+by MirrorMaker. Both feed Elasticsearch — that cross-mirroring is what makes the
+session data in DC and in DR complete, and it is unchanged.
+
+Only the first is forwarded to Airtel. DC and DR both run this service against
+the same Airtel topic, so a CDR produced in DR is published by the DR service
+off its primary channel and, when the mirror channel forwarded too, published a
+second time by the DC service off `dr.cdr-event-dr` — the same CDR on the Airtel
+topic twice. Publishing only from the primary channel makes the zone a CDR was
+produced in the one zone that publishes it, so each CDR reaches Airtel exactly
+once, from whichever zone produced it, with no change to the Elasticsearch flow.
+
+The exception is a failover: if the peer zone's cdr-service is down while
+MirrorMaker still delivers its CDRs, nothing is publishing them. Setting
+`publish-from-mirror` to `true` in the surviving zone has it publish those too
+until the peer is back — and it has to be set back to `false` then, or CDRs are
+published twice again.
 
 The traffic is one way: a failure to publish is logged and counted as a
 `producer`/`kafka` exception on the error dashboards, but it never fails an
@@ -129,8 +150,8 @@ service. A broker that stops answering altogether is waited on for
 `publish-timeout-ms` at most — past that the consumer moves on while the record
 stays queued in the producer, which still delivers it once the broker returns.
 
-The cluster, the topic and that wait are configurable, and the cluster defaults
-to the one the events are consumed from:
+The cluster, the topic, that wait and the failover override are configurable, and
+the cluster defaults to the one the events are consumed from:
 
 ```yaml
 airtel:
@@ -138,7 +159,13 @@ airtel:
     bootstrap-servers: "${AIRTEL_KAFKA_BOOTSTRAP_SERVERS:kafka-headless.cluster-dc.svc.cluster.local:9092}"
     topic: "${AIRTEL_KAFKA_TOPIC:cdr-event-airtel}"
     publish-timeout-ms: "${AIRTEL_KAFKA_PUBLISH_TIMEOUT_MS:10000}"
+    publish-from-mirror: "${AIRTEL_KAFKA_PUBLISH_FROM_MIRROR:false}"
 ```
+
+One thing to check on the broker side: the Airtel topic itself must stay out of
+the MirrorMaker topic list. It carries the CDRs of both zones already, so
+replicating it to the peer cluster only creates a second copy for anything that
+consumes the Airtel stream from both clusters.
 
 ## Elasticsearch session indices
 
