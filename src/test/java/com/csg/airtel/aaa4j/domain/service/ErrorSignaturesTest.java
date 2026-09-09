@@ -3,6 +3,7 @@ package com.csg.airtel.aaa4j.domain.service;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -39,6 +40,27 @@ class ErrorSignaturesTest {
         // split a single fault across several catalog rows.
         assertNull(ErrorSignatures.codeFromMessage("the dog rested-42"));
         assertNull(ErrorSignatures.codeFromMessage("rested-42nd time"));
+    }
+
+    @Test
+    void exhaustingAllPrefixStripsWithoutFindingACodeReturnsNull() {
+        // Three dotted prefixes, all stripped, and still no code at the head.
+        assertNull(ErrorSignatures.codeFromMessage("a.b.C: d.e.F: g.h.I: plain text no code"));
+    }
+
+    @Test
+    void lettersFollowedByADashButNoDigitsIsNotACode() {
+        assertNull(ErrorSignatures.codeFromMessage("ABC-xyz further text"));
+    }
+
+    @Test
+    void aCodeLongerThanTheMaxLengthIsRejected() {
+        assertNull(ErrorSignatures.codeFromMessage("ABCDEFGHIJKLMNOPQRSTUVWXYZ-123456789012345 rest"));
+    }
+
+    @Test
+    void aClassPrefixColonNotFollowedBySpaceIsNotStripped() {
+        assertNull(ErrorSignatures.codeFromMessage("com.foo.Bar:noSpaceAfterColon"));
     }
 
     @Test
@@ -113,10 +135,41 @@ class ErrorSignaturesTest {
     }
 
     @Test
+    void messageEntirelyConsumedByAStrippedPrefixIsReportedAsNoReason() {
+        assertEquals(ErrorSignatures.NO_REASON, ErrorSignatures.normalizeReason("com.foo.Bar: "));
+    }
+
+    @Test
+    void reasonThatCollapsesToNothingAfterTrimmingIsReportedAsNoReason() {
+        // A lone colon is copied literally, then trimmed away entirely by trimTrailing.
+        assertEquals(ErrorSignatures.NO_REASON, ErrorSignatures.normalizeReason(":"));
+    }
+
+    @Test
+    void truncationCanHappenBetweenTokensRatherThanMidToken() {
+        // Many short "ab " units cross MAX_REASON_LEN exactly at a token boundary, so the
+        // length check at the top of the loop is what stops it, not a mid-token clamp.
+        String reason = ErrorSignatures.normalizeReason("ab ".repeat(40));
+        assertTrue(reason.endsWith("..."));
+        assertTrue(reason.length() <= ErrorSignatures.MAX_REASON_LEN + 3);
+    }
+
+    @Test
+    void bracketedLiteralsAreMaskedLikeQuotedOnes() {
+        assertEquals("value ? here", ErrorSignatures.normalizeReason("value [redacted] here"));
+        assertEquals("data ? sent", ErrorSignatures.normalizeReason("data {payload} sent"));
+    }
+
+    @Test
+    void adjacentMaskedTokensCollapseToASinglePlaceholder() {
+        assertEquals("a ? b", ErrorSignatures.normalizeReason("a 'x''y' b"));
+    }
+
+    @Test
     void differentFaultsStayDistinct() {
         String duplicateKey = ErrorSignatures.normalizeReason("ORA-00001: unique constraint violated");
         String noListener = ErrorSignatures.normalizeReason("ORA-12541: TNS:no listener");
-        assertTrue(!duplicateKey.equals(noListener));
+        assertNotEquals(duplicateKey, noListener);
     }
 
     @Test
@@ -133,5 +186,15 @@ class ErrorSignaturesTest {
         assertTrue(ErrorSignatures.sampleOf("y".repeat(4_000)).length()
                 <= ErrorSignatures.MAX_SAMPLE_LEN + 3);
         assertEquals(ErrorSignatures.NO_REASON, ErrorSignatures.sampleOf(null));
+    }
+
+    @Test
+    void sampleOfAnEmptyStringIsReportedAsNoReason() {
+        assertEquals(ErrorSignatures.NO_REASON, ErrorSignatures.sampleOf(""));
+    }
+
+    @Test
+    void sampleCollapsesARunOfInternalWhitespaceToOneSpace() {
+        assertEquals("hello world", ErrorSignatures.sampleOf("hello   world"));
     }
 }

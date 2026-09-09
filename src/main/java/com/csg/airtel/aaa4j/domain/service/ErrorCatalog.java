@@ -122,7 +122,7 @@ public class ErrorCatalog {
      * @param layer     application layer label
      * @param source    originating subsystem label
      */
-    public void record(Throwable root, String errorType, String layer, String source) {
+    public void recordOccurrence(Throwable root, String errorType, String layer, String source) {
         if (root == null || errorType == null) {
             return;
         }
@@ -252,7 +252,7 @@ public class ErrorCatalog {
     }
 
     private static String safe(String value) {
-        return (value == null || value.isBlank()) ? "unknown" : value;
+        return (value == null || value.isBlank()) ? UNKNOWN_ORIGIN : value;
     }
 
     /**

@@ -1,6 +1,7 @@
 package com.csg.airtel.aaa4j.domain.resource;
 
 import com.csg.airtel.aaa4j.common.LoggingUtil;
+import com.csg.airtel.aaa4j.domain.model.connectionhistory.SessionSearchCriteria;
 import com.csg.airtel.aaa4j.domain.service.connectionhistory.ConnectionHistoryService;
 import io.smallrye.mutiny.Uni;
 import jakarta.ws.rs.*;
@@ -23,28 +24,21 @@ public class ConnectionHistoryResource {
 
     @GET
     @Path("/summary/filter")
-    public Uni<Response> getSessions(
-            @QueryParam("username") String username,
-            @QueryParam("connectionStatus") String connectionStatus,
-            @QueryParam("sessionId") String sessionId,
-            @QueryParam("groupId") String groupId,
-            @QueryParam("startTime") String startTime,
-            @QueryParam("endTime") String endTime,
-            @QueryParam("pageSize") @DefaultValue("10") int pageSize,
-            @QueryParam("page") @DefaultValue("1") int page
-    ) {
+    public Uni<Response> getSessions(@BeanParam SessionSearchParams params) {
         LoggingUtil.logInfo(log, "getSessions", "Controller Request Received : ConnectionHistoryResource : fetchSessionDetails");
 
-        return connectionHistoryService.fetchSessionDetails(
-                        username,
-                        connectionStatus,
-                        sessionId,
-                        groupId,
-                        startTime,
-                        endTime,
-                        pageSize,
-                        page
-                )
+        SessionSearchCriteria criteria = new SessionSearchCriteria(
+                params.username,
+                params.connectionStatus,
+                params.sessionId,
+                params.groupId,
+                params.startTime,
+                params.endTime,
+                params.pageSize,
+                params.page
+        );
+
+        return connectionHistoryService.fetchSessionDetails(criteria)
                 .map(sessions -> Response.ok(sessions).build());
     }
 

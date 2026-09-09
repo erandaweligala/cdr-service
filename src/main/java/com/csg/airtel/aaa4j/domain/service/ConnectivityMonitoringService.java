@@ -29,6 +29,7 @@ import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * Tracks reachability of the three infrastructure dependencies the CDR service cannot
@@ -132,7 +133,7 @@ public class ConnectivityMonitoringService {
     private final Map<Dependency, DependencyState> states = new EnumMap<>(Dependency.class);
 
     /** Created on the first Kafka probe so a broker outage at boot does not block startup. */
-    private volatile AdminClient kafkaAdminClient;
+    private final AtomicReference<AdminClient> kafkaAdminClientRef = new AtomicReference<>();
 
     @Inject
     public ConnectivityMonitoringService(
@@ -327,12 +328,13 @@ public class ConnectivityMonitoringService {
     }
 
     private AdminClient kafkaAdminClient() {
-        AdminClient client = kafkaAdminClient;
+        AdminClient client = kafkaAdminClientRef.get();
         if (client != null) {
             return client;
         }
         synchronized (this) {
-            if (kafkaAdminClient == null) {
+            client = kafkaAdminClientRef.get();
+            if (client == null) {
                 int timeoutMs = (int) config.probeTimeoutMs();
                 Properties props = new Properties();
                 props.put(AdminClientConfig.BOOTSTRAP_SERVERS_CONFIG, kafkaBootstrapServers);
@@ -340,11 +342,12 @@ public class ConnectivityMonitoringService {
                 props.put(AdminClientConfig.REQUEST_TIMEOUT_MS_CONFIG, timeoutMs);
                 props.put(AdminClientConfig.DEFAULT_API_TIMEOUT_MS_CONFIG, timeoutMs * 2);
                 props.put(AdminClientConfig.RETRIES_CONFIG, 0);
-                kafkaAdminClient = AdminClient.create(props);
+                client = AdminClient.create(props);
+                kafkaAdminClientRef.set(client);
                 LoggingUtil.logInfo(log, M_PROBE, "Kafka connectivity probe client created for bootstrap servers: %s",
                         kafkaBootstrapServers);
             }
-            return kafkaAdminClient;
+            return client;
         }
     }
 
@@ -394,7 +397,7 @@ public class ConnectivityMonitoringService {
 
     @PreDestroy
     void close() {
-        AdminClient client = kafkaAdminClient;
+        AdminClient client = kafkaAdminClientRef.get();
         if (client != null) {
             try {
                 client.close(Duration.ofSeconds(5));

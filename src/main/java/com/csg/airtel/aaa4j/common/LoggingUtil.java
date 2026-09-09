@@ -84,53 +84,61 @@ public class LoggingUtil {
      */
     private static String buildMessage(String method, String message, Object... args) {
         // Null guards — prevent NPE from method.length() / message.length() / args.length
-        if (method == null)  method  = "";
-        if (message == null) message = "";
-        if (args == null)    args    = EMPTY_ARGS;
+        String safeMethod = method == null ? "" : method;
+        String safeMessage = message == null ? "" : message;
+        Object[] safeArgs = args == null ? EMPTY_ARGS : args;
 
         StringBuilder sb = SB_POOL.get();
         sb.setLength(0);
 
         // Pre-size hint avoids 1–2 intermediate re-allocations on first use per thread
         // when the message is longer than the initial 256-byte buffer.
-        sb.ensureCapacity(method.length() + message.length() + 32);
+        sb.ensureCapacity(safeMethod.length() + safeMessage.length() + 32);
 
-        sb.append('[').append(method).append(']');
+        sb.append('[').append(safeMethod).append(']');
 
-        if (args.length == 0) {
-            sb.append(message);
+        if (safeArgs.length == 0) {
+            sb.append(safeMessage);
         } else {
-            // Manual single-pass placeholder replacement — ~5x faster than String.format()
-            int argIndex = 0;
-            int len = message.length();
-            for (int i = 0; i < len; i++) {
-                char c = message.charAt(i);
-                if (c == '%' && i + 1 < len && argIndex < args.length) {
-                    char next = message.charAt(i + 1);
-                    if (next == 's' || next == 'd') {
-                        sb.append(args[argIndex++]);
-                        i++; // skip format char
-                    } else if (next == '%') {
-                        sb.append('%');
-                        i++;
-                    } else {
-                        sb.append(c);
-                    }
-                } else {
-                    sb.append(c);
-                }
-            }
+            appendWithPlaceholders(sb, safeMessage, safeArgs);
         }
 
         String result = sb.toString();
 
-        // Trim pooled buffer if a large message caused it to grow past the soft cap,
-        // so threads processing many large messages don't permanently hold excess memory.
+        // Release the pooled buffer if a large message caused it to grow past the soft cap.
+        // The thread-local lazily reinitializes to the default size on its next use, so
+        // threads processing many large messages don't permanently hold the excess memory.
         if (sb.capacity() > SB_SOFT_CAP) {
-            SB_POOL.set(new StringBuilder(256));
+            SB_POOL.remove();
         }
 
         return result;
+    }
+
+    /**
+     * Manual single-pass placeholder replacement — ~5x faster than String.format().
+     * Supports %s and %d placeholders; %% emits a literal %.
+     */
+    private static void appendWithPlaceholders(StringBuilder sb, String message, Object[] args) {
+        int argIndex = 0;
+        int len = message.length();
+        int i = 0;
+        while (i < len) {
+            char c = message.charAt(i);
+            char next = (c == '%' && i + 1 < len) ? message.charAt(i + 1) : '\0';
+            boolean hasArg = argIndex < args.length;
+
+            if (c == '%' && hasArg && (next == 's' || next == 'd')) {
+                sb.append(args[argIndex++]);
+                i += 2;
+            } else if (c == '%' && hasArg && next == '%') {
+                sb.append('%');
+                i += 2;
+            } else {
+                sb.append(c);
+                i++;
+            }
+        }
     }
 
 }

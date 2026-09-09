@@ -193,55 +193,7 @@ final class ErrorSignatures {
         }
 
         StringBuilder out = new StringBuilder(MAX_REASON_LEN + 4);
-        int i = start;
-        boolean truncated = false;
-
-        while (i < len) {
-            if (out.length() >= MAX_REASON_LEN) {
-                truncated = true;
-                break;
-            }
-            char c = message.charAt(i);
-
-            if (isSpace(c)) {
-                i = skipSpaces(message, i, len);
-                if (out.length() > 0 && out.charAt(out.length() - 1) != ' ') {
-                    out.append(' ');
-                }
-                continue;
-            }
-            if (c == '\'' || c == '"' || c == '`') {
-                i = skipQuoted(message, i, len, c);
-                appendPlaceholder(out, '?');
-                continue;
-            }
-            if (c == '[' || c == '{') {
-                i = skipBracketed(message, i, len, c);
-                appendPlaceholder(out, '?');
-                continue;
-            }
-            if (isTokenStart(c)) {
-                int end = i;
-                while (end < len && isTokenChar(message.charAt(end))) {
-                    end++;
-                }
-                if (looksVariable(message, i, end)) {
-                    appendPlaceholder(out, '#');
-                } else {
-                    // Clamp to the remaining budget: a single very long token must not
-                    // push the label past MAX_REASON_LEN.
-                    int copyEnd = Math.min(end, i + (MAX_REASON_LEN - out.length()));
-                    out.append(message, i, copyEnd);
-                    if (copyEnd < end) {
-                        truncated = true;
-                    }
-                }
-                i = end;
-                continue;
-            }
-            out.append(c);
-            i++;
-        }
+        boolean truncated = buildReasonBody(message, start, len, out);
 
         trimTrailing(out);
         if (out.length() == 0) {
@@ -251,6 +203,70 @@ final class ErrorSignatures {
             out.append("...");
         }
         return out.toString();
+    }
+
+    /**
+     * Copies {@code message[start, len)} into {@code out}, masking variable tokens, until the
+     * input is exhausted or {@value #MAX_REASON_LEN} characters have been emitted.
+     *
+     * @return {@code true} if the reason had to be cut short
+     */
+    private static boolean buildReasonBody(String message, int start, int len, StringBuilder out) {
+        int i = start;
+        while (i < len) {
+            if (out.length() >= MAX_REASON_LEN) {
+                return true;
+            }
+            char c = message.charAt(i);
+
+            if (isSpace(c)) {
+                i = appendSpace(message, i, len, out);
+            } else if (c == '\'' || c == '"' || c == '`') {
+                i = skipQuoted(message, i, len, c);
+                appendPlaceholder(out, '?');
+            } else if (c == '[' || c == '{') {
+                i = skipBracketed(message, i, len, c);
+                appendPlaceholder(out, '?');
+            } else if (isTokenStart(c)) {
+                TokenResult token = appendToken(message, i, len, out);
+                if (token.truncated()) {
+                    return true;
+                }
+                i = token.nextIndex();
+            } else {
+                out.append(c);
+                i++;
+            }
+        }
+        return false;
+    }
+
+    private static int appendSpace(String message, int i, int len, StringBuilder out) {
+        int next = skipSpaces(message, i, len);
+        if (out.length() > 0 && out.charAt(out.length() - 1) != ' ') {
+            out.append(' ');
+        }
+        return next;
+    }
+
+    /** Outcome of masking or copying one token: where scanning resumes, and whether it was cut short. */
+    private record TokenResult(int nextIndex, boolean truncated) {
+    }
+
+    private static TokenResult appendToken(String message, int i, int len, StringBuilder out) {
+        int end = i;
+        while (end < len && isTokenChar(message.charAt(end))) {
+            end++;
+        }
+        if (looksVariable(message, i, end)) {
+            appendPlaceholder(out, '#');
+            return new TokenResult(end, false);
+        }
+        // Clamp to the remaining budget: a single very long token must not push the label
+        // past MAX_REASON_LEN.
+        int copyEnd = Math.min(end, i + (MAX_REASON_LEN - out.length()));
+        out.append(message, i, copyEnd);
+        return new TokenResult(end, copyEnd < end);
     }
 
     /**
@@ -297,41 +313,68 @@ final class ErrorSignatures {
     private static int stripWrapperPrefixes(String message, int from, int len) {
         int start = from;
         for (int pass = 0; pass < MAX_PREFIX_STRIPS; pass++) {
-            int colon = -1;
-            boolean hasDot = false;
-            boolean hasDashDigit = false;
-            boolean sawSpace = false;
-            for (int i = start; i < len && i - start <= MAX_CODE_SCAN; i++) {
-                char c = message.charAt(i);
-                if (c == ':') {
-                    colon = i;
-                    break;
-                }
-                if (isSpace(c)) {
-                    sawSpace = true;
-                    break;
-                }
-                if (c == '.') {
-                    hasDot = true;
-                } else if (c == '-' && i + 1 < len && isAsciiDigit(message.charAt(i + 1))) {
-                    hasDashDigit = true;
-                }
-            }
-            // A prefix worth dropping is a dotted class name or a vendor code, and
-            // must be followed by whitespace so we never cut "10.0.0.1:8081" in half.
-            if (colon < 0 || sawSpace || colon == start || !(hasDot || hasDashDigit)) {
+            int next = stripOnePrefix(message, start, len);
+            if (next < 0) {
                 return start;
             }
-            int next = colon + 1;
-            if (next >= len || !isSpace(message.charAt(next))) {
-                return start;
-            }
-            start = skipSpaces(message, next, len);
+            start = next;
             if (start >= len) {
                 return start;
             }
         }
         return start;
+    }
+
+    /**
+     * Strips one {@code "<class-or-code>: "} prefix starting at {@code start}.
+     *
+     * @return the index just past the prefix, or {@code -1} if there is none there
+     */
+    private static int stripOnePrefix(String message, int start, int len) {
+        int colon = findPrefixColon(message, start, len);
+        // A prefix worth dropping is a dotted class name or a vendor code, and must be
+        // followed by whitespace so we never cut "10.0.0.1:8081" in half.
+        if (colon < 0 || colon == start || !hasClassOrCodeShape(message, start, colon)) {
+            return -1;
+        }
+        int next = colon + 1;
+        if (next >= len || !isSpace(message.charAt(next))) {
+            return -1;
+        }
+        return skipSpaces(message, next, len);
+    }
+
+    /**
+     * Finds the colon ending a candidate prefix, scanning at most {@value #MAX_CODE_SCAN}
+     * characters. Returns {@code -1} if whitespace is hit first, or none is found in range.
+     */
+    private static int findPrefixColon(String message, int start, int len) {
+        int limit = Math.min(len, start + MAX_CODE_SCAN);
+        for (int i = start; i < limit; i++) {
+            char c = message.charAt(i);
+            if (c == ':') {
+                return i;
+            }
+            if (isSpace(c)) {
+                return -1;
+            }
+        }
+        return -1;
+    }
+
+    /** {@code true} if {@code message[start, colon)} looks like a dotted class name or a vendor code. */
+    private static boolean hasClassOrCodeShape(String message, int start, int colon) {
+        boolean hasDot = false;
+        boolean hasDashDigit = false;
+        for (int i = start; i < colon; i++) {
+            char c = message.charAt(i);
+            if (c == '.') {
+                hasDot = true;
+            } else if (c == '-' && i + 1 < colon && isAsciiDigit(message.charAt(i + 1))) {
+                hasDashDigit = true;
+            }
+        }
+        return hasDot || hasDashDigit;
     }
 
     /**

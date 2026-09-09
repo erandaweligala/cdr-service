@@ -98,7 +98,7 @@ public class ElasticSearchService {
                             "Failed to append session instance: %s", session.getSessionId());
                     if (metrics != null && !metrics.isUnsatisfied()) {
                         metrics.get().recordException(
-                                (Throwable) e,
+                                e,
                                 ExceptionMetricsService.Layer.CLIENT,
                                 ExceptionMetricsService.Source.ELASTICSEARCH);
                     }

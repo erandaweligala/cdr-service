@@ -41,6 +41,8 @@ public class AirtelEventPublisher {
 
     private static final Logger LOG = Logger.getLogger(AirtelEventPublisher.class);
 
+    private static final String METHOD_PUBLISH = "publish";
+
     /**
      * Bounded buffer in front of the Kafka producer. In-flight sends are already capped by the
      * consumer channels' concurrency, so this only absorbs bursts; it never grows without bound.
@@ -74,14 +76,14 @@ public class AirtelEventPublisher {
         String key = resolveKey(event, incomingKey);
         try {
             Uni<Void> send = emitter.send(Record.of(key, event))
-                    .onItem().invoke(() -> LoggingUtil.logDebug(LOG, "publish",
+                    .onItem().invoke(() -> LoggingUtil.logDebug(LOG, METHOD_PUBLISH,
                             "Event published to Airtel topic: %s", event.getEventId()));
 
             if (publishTimeoutMillis > 0) {
                 send = send.ifNoItem().after(Duration.ofMillis(publishTimeoutMillis)).recoverWithItem(() -> {
                     // The record stays queued in the producer and is still delivered once the broker
                     // answers; we just stop holding the consumer lane while it does not.
-                    LoggingUtil.logWarn(LOG, "publish",
+                    LoggingUtil.logWarn(LOG, METHOD_PUBLISH,
                             "Airtel topic did not acknowledge event %s within %d ms; no longer waiting",
                             event.getEventId(), publishTimeoutMillis);
                     return null;
@@ -116,7 +118,7 @@ public class AirtelEventPublisher {
     }
 
     private void recordFailure(AccountingEvent event, Throwable failure) {
-        LoggingUtil.logError(LOG, "publish", failure,
+        LoggingUtil.logError(LOG, METHOD_PUBLISH, failure,
                 "Failed to publish event %s of type %s to the Airtel topic",
                 event.getEventId(), event.getEventType());
 

@@ -28,7 +28,7 @@ public final class TraceIdGenerator {
 	 *         e.g. "3f5a4c8e-20260206120000123"
 	 */
 	public static String generateTraceId() {
-		long random = ThreadLocalRandom.current().nextLong();
+		long random = ThreadLocalRandom.current().nextLong(); // NOSONAR - java:S2245: non-cryptographic use, trace ID for log correlation only, not a security token
 		StringBuilder sb = new StringBuilder(26);
 		for (int i = 0; i < 8; i++) {
 			sb.append(HEX_CHARS[(int) (random & 0x0F)]);

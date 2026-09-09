@@ -126,6 +126,36 @@ class SessionServiceTest {
         assertNotNull(sessionCaptor.getValue().getUpdatedTime());
     }
 
+    @Test
+    void testProcessInterimEvent_SessionNotFound_CreatesNewSession() {
+        String uniqueSessionId = sessionId + nasPort;
+        when(redisRepository.findBySessionId(uniqueSessionId))
+                .thenReturn(Uni.createFrom().item(Optional.empty()));
+
+        sessionService.processInterimEvent(interimEvent).await().indefinitely();
+
+        ArgumentCaptor<Session> sessionCaptor = ArgumentCaptor.forClass(Session.class);
+        verify(redisRepository).save(sessionCaptor.capture(), eq(uniqueSessionId));
+        assertEquals(SessionStatus.ACTIVE, sessionCaptor.getValue().getConnectionStatus());
+        assertEquals(sessionId, sessionCaptor.getValue().getSessionId());
+    }
+
+    @Test
+    void testProcessInterimEvent_NegativeUsageDeltaFallsBackToPayloadSessionUsage() {
+        String uniqueSessionId = sessionId + nasPort;
+        // Higher than the event's totalUsage (2048L), so the cumulative delta goes negative
+        // and computeInstanceUsage() must fall back to the payload's own sessionUsage (512L).
+        existingSession.setUsage(5000L);
+        when(redisRepository.findBySessionId(uniqueSessionId))
+                .thenReturn(Uni.createFrom().item(Optional.of(existingSession)));
+
+        sessionService.processInterimEvent(interimEvent).await().indefinitely();
+
+        ArgumentCaptor<SessionInstanceInfo> instanceCaptor = ArgumentCaptor.forClass(SessionInstanceInfo.class);
+        verify(elasticsearchService).appendInstance(any(Session.class), eq(uniqueSessionId), anyString(), instanceCaptor.capture());
+        assertEquals(512L, instanceCaptor.getValue().getUsage());
+    }
+
     // ============ ACCOUNTING_STOP Tests ============
 
     @Test
@@ -184,6 +214,54 @@ class SessionServiceTest {
                 .thenReturn(Uni.createFrom().item(Optional.of(existingSession)));
 
         sessionService.processStopEvent(stopEvent).await().indefinitely();
+
+        ArgumentCaptor<Session> sessionCaptor = ArgumentCaptor.forClass(Session.class);
+        verify(elasticsearchService).appendInstance(sessionCaptor.capture(), anyString(), anyString(), any(SessionInstanceInfo.class));
+        assertNotNull(sessionCaptor.getValue().getEndTime());
+    }
+
+    // ============ IDLE_TIMEOUT Tests ============
+
+    @Test
+    void testProcessIdleTimeoutEvent_ExistingSession() {
+        String uniqueSessionId = sessionId + nasPort;
+        AccountingEvent idleTimeoutEvent = createAccountingEvent("IDLE_TIMEOUT", Instant.now());
+        when(redisRepository.findBySessionId(uniqueSessionId))
+                .thenReturn(Uni.createFrom().item(Optional.of(existingSession)));
+
+        sessionService.processIdleTimeoutEvent(idleTimeoutEvent).await().indefinitely();
+
+        verify(elasticsearchService, times(1)).appendInstance(any(Session.class), eq(uniqueSessionId), anyString(), any(SessionInstanceInfo.class));
+        verify(redisRepository, times(1)).delete(uniqueSessionId);
+
+        ArgumentCaptor<Session> sessionCaptor = ArgumentCaptor.forClass(Session.class);
+        verify(elasticsearchService).appendInstance(sessionCaptor.capture(), anyString(), anyString(), any(SessionInstanceInfo.class));
+        assertEquals(SessionStatus.IDLE_TIMEOUT, sessionCaptor.getValue().getConnectionStatus());
+        assertNotNull(sessionCaptor.getValue().getEndTime());
+    }
+
+    @Test
+    void testProcessIdleTimeoutEvent_SessionNotFound_CreatesNewSession() {
+        String uniqueSessionId = sessionId + nasPort;
+        AccountingEvent idleTimeoutEvent = createAccountingEvent("IDLE_TIMEOUT", Instant.now());
+        when(redisRepository.findBySessionId(uniqueSessionId))
+                .thenReturn(Uni.createFrom().item(Optional.empty()));
+
+        sessionService.processIdleTimeoutEvent(idleTimeoutEvent).await().indefinitely();
+
+        ArgumentCaptor<Session> sessionCaptor = ArgumentCaptor.forClass(Session.class);
+        verify(elasticsearchService).appendInstance(sessionCaptor.capture(), eq(uniqueSessionId), anyString(), any(SessionInstanceInfo.class));
+        assertEquals(SessionStatus.IDLE_TIMEOUT, sessionCaptor.getValue().getConnectionStatus());
+    }
+
+    @Test
+    void testProcessIdleTimeoutEvent_WithoutStopTime() {
+        String uniqueSessionId = sessionId + nasPort;
+        AccountingEvent idleTimeoutEvent = createAccountingEvent("IDLE_TIMEOUT", null);
+        when(redisRepository.findBySessionId(uniqueSessionId))
+                .thenReturn(Uni.createFrom().item(Optional.of(existingSession)));
+
+        sessionService.processIdleTimeoutEvent(idleTimeoutEvent).await().indefinitely();
 
         ArgumentCaptor<Session> sessionCaptor = ArgumentCaptor.forClass(Session.class);
         verify(elasticsearchService).appendInstance(sessionCaptor.capture(), anyString(), anyString(), any(SessionInstanceInfo.class));
@@ -346,9 +424,8 @@ class SessionServiceTest {
     void testGetUniqueId_NullSessionId_ThrowsBaseException() {
         startEvent.getPayload().getSession().setSessionId(null);
 
-        BaseException exception = assertThrows(BaseException.class, () ->
-                sessionService.processStartEvent(startEvent).await().indefinitely()
-        );
+        Uni<Void> resultUni = sessionService.processStartEvent(startEvent);
+        BaseException exception = assertThrows(BaseException.class, () -> await(resultUni));
 
         assertTrue(exception.getMessage().contains("Incomplete CDR Data"));
         assertTrue(exception.getMessage().contains("sessionId and nasPort are required"));
@@ -361,9 +438,8 @@ class SessionServiceTest {
     void testGetUniqueId_NullNasPort_ThrowsBaseException() {
         startEvent.getPayload().getSession().setNasPort(null);
 
-        BaseException exception = assertThrows(BaseException.class, () ->
-                sessionService.processStartEvent(startEvent).await().indefinitely()
-        );
+        Uni<Void> resultUni = sessionService.processStartEvent(startEvent);
+        BaseException exception = assertThrows(BaseException.class, () -> await(resultUni));
 
         assertTrue(exception.getMessage().contains("Incomplete CDR Data"));
         assertTrue(exception.getMessage().contains("sessionId and nasPort are required"));
@@ -377,9 +453,8 @@ class SessionServiceTest {
         startEvent.getPayload().getSession().setSessionId(null);
         startEvent.getPayload().getSession().setNasPort(null);
 
-        BaseException exception = assertThrows(BaseException.class, () ->
-                sessionService.processStartEvent(startEvent).await().indefinitely()
-        );
+        Uni<Void> resultUni = sessionService.processStartEvent(startEvent);
+        BaseException exception = assertThrows(BaseException.class, () -> await(resultUni));
 
         assertTrue(exception.getMessage().contains("Incomplete CDR Data"));
         assertEquals(HttpStatus.SC_BAD_REQUEST, exception.getHttpStatus());
@@ -390,24 +465,24 @@ class SessionServiceTest {
     @Test
     void testGetUniqueId_CalledForEveryEventType() {
         startEvent.getPayload().getSession().setSessionId(null);
-        assertThrows(BaseException.class, () ->
-                sessionService.processStartEvent(startEvent).await().indefinitely());
+        Uni<Void> startUni = sessionService.processStartEvent(startEvent);
+        assertThrows(BaseException.class, () -> await(startUni));
 
         interimEvent.getPayload().getSession().setSessionId(null);
-        assertThrows(BaseException.class, () ->
-                sessionService.processInterimEvent(interimEvent).await().indefinitely());
+        Uni<Void> interimUni = sessionService.processInterimEvent(interimEvent);
+        assertThrows(BaseException.class, () -> await(interimUni));
 
         stopEvent.getPayload().getSession().setSessionId(null);
-        assertThrows(BaseException.class, () ->
-                sessionService.processStopEvent(stopEvent).await().indefinitely());
+        Uni<Void> stopUni = sessionService.processStopEvent(stopEvent);
+        assertThrows(BaseException.class, () -> await(stopUni));
 
         coaRequestEvent.getPayload().getSession().setSessionId(null);
-        assertThrows(BaseException.class, () ->
-                sessionService.processCoaRequestEvent(coaRequestEvent).await().indefinitely());
+        Uni<Void> coaRequestUni = sessionService.processCoaRequestEvent(coaRequestEvent);
+        assertThrows(BaseException.class, () -> await(coaRequestUni));
 
         coaResponseEvent.getPayload().getSession().setSessionId(null);
-        assertThrows(BaseException.class, () ->
-                sessionService.processCoaResponseEvent(coaResponseEvent).await().indefinitely());
+        Uni<Void> coaResponseUni = sessionService.processCoaResponseEvent(coaResponseEvent);
+        assertThrows(BaseException.class, () -> await(coaResponseUni));
 
         verify(elasticsearchService, never()).appendInstance(any(), anyString(), anyString(), any());
         verify(redisRepository, never()).save(any(), anyString());
@@ -477,9 +552,8 @@ class SessionServiceTest {
         when(redisRepository.findBySessionId(uniqueSessionId))
                 .thenReturn(Uni.createFrom().item(Optional.of(existingSession)));
 
-        BaseException exception = assertThrows(BaseException.class, () ->
-                sessionService.processCoaResponseEvent(invalidEvent).await().indefinitely()
-        );
+        Uni<Void> resultUni = sessionService.processCoaResponseEvent(invalidEvent);
+        BaseException exception = assertThrows(BaseException.class, () -> await(resultUni));
 
         assertTrue(exception.getMessage().contains("Invalid COA Status"));
         assertTrue(exception.getMessage().contains("UNKNOWN"));
@@ -494,9 +568,8 @@ class SessionServiceTest {
         when(redisRepository.findBySessionId(uniqueSessionId))
                 .thenReturn(Uni.createFrom().item(Optional.of(existingSession)));
 
-        BaseException exception = assertThrows(BaseException.class, () ->
-                sessionService.processCoaResponseEvent(nullCoaEvent).await().indefinitely()
-        );
+        Uni<Void> resultUni = sessionService.processCoaResponseEvent(nullCoaEvent);
+        BaseException exception = assertThrows(BaseException.class, () -> await(resultUni));
 
         assertTrue(exception.getMessage().contains("Incomplete COA Data"));
         assertEquals(HttpStatus.SC_BAD_REQUEST, exception.getHttpStatus());
@@ -510,9 +583,8 @@ class SessionServiceTest {
         when(redisRepository.findBySessionId(uniqueSessionId))
                 .thenReturn(Uni.createFrom().item(Optional.of(existingSession)));
 
-        BaseException exception = assertThrows(BaseException.class, () ->
-                sessionService.processCoaResponseEvent(nullStatusEvent).await().indefinitely()
-        );
+        Uni<Void> resultUni = sessionService.processCoaResponseEvent(nullStatusEvent);
+        BaseException exception = assertThrows(BaseException.class, () -> await(resultUni));
 
         assertTrue(exception.getMessage().contains("Incomplete COA Data"));
         assertEquals(HttpStatus.SC_BAD_REQUEST, exception.getHttpStatus());
@@ -525,15 +597,19 @@ class SessionServiceTest {
         when(redisRepository.findBySessionId(uniqueSessionId))
                 .thenReturn(Uni.createFrom().item(Optional.of(existingSession)));
 
-        BaseException exception = assertThrows(BaseException.class, () ->
-                sessionService.processCoaResponseEvent(emptyStatusEvent).await().indefinitely()
-        );
+        Uni<Void> resultUni = sessionService.processCoaResponseEvent(emptyStatusEvent);
+        BaseException exception = assertThrows(BaseException.class, () -> await(resultUni));
 
         assertTrue(exception.getMessage().contains("Invalid COA Status"));
         assertEquals(HttpStatus.SC_BAD_REQUEST, exception.getHttpStatus());
     }
 
     // ============ Helper Methods ============
+
+    /** Blocks for the result of {@code uni}, isolated so assertThrows lambdas make exactly one call. */
+    private static <T> T await(Uni<T> uni) {
+        return uni.await().indefinitely();
+    }
 
     private String todayIndex() {
         return "test-sessions-index-"

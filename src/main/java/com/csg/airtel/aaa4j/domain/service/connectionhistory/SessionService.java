@@ -11,7 +11,6 @@ import org.apache.http.HttpStatus;
 import org.jboss.logging.Logger;
 
 import java.time.Instant;
-import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.Date;
 
@@ -19,6 +18,10 @@ import java.util.Date;
 public class SessionService {
 
     private static final Logger LOG = Logger.getLogger(SessionService.class);
+
+    private static final String METHOD_PROCESS_START_EVENT = "processStartEvent";
+    private static final String MSG_SESSION_NOT_FOUND_CREATING =
+            "Session not found for %s event: %s, creating new session";
 
     private final SessionRedisRepository redisRepository;
     private final ElasticSearchService elasticsearchService;
@@ -32,7 +35,7 @@ public class SessionService {
      * Process ACCOUNTING_START event
      */
     public Uni<Void> processStartEvent(AccountingEvent event) {
-        LoggingUtil.logDebug(LOG, "processStartEvent", "Processing START event: %s", event.getEventId());
+        LoggingUtil.logDebug(LOG, METHOD_PROCESS_START_EVENT, "Processing START event: %s", event.getEventId());
 
         return Uni.createFrom().item(() -> getUniqueIdFromSessionCDR(event.getPayload().getSession()))
                 .flatMap(uniqueSessionId -> redisRepository.findBySessionId(uniqueSessionId)
@@ -40,18 +43,18 @@ public class SessionService {
                             Session session;
                             if (existing.isPresent()) {
                                 session = existing.get();
-                                LoggingUtil.logWarn(LOG, "processStartEvent",
+                                LoggingUtil.logWarn(LOG, METHOD_PROCESS_START_EVENT,
                                         "Session already exists for START event: %s, updating existing session",
                                         session.getSessionId());
                                 updateSessionFromStart(session, event);
                             } else {
-                                LoggingUtil.logWarn(LOG, "processStartEvent",
-                                        "Session not found for %s event: %s, creating new session",
+                                LoggingUtil.logWarn(LOG, METHOD_PROCESS_START_EVENT,
+                                        MSG_SESSION_NOT_FOUND_CREATING,
                                         event.getEventType(), uniqueSessionId);
                                 session = createSession(event, uniqueSessionId);
                             }
                             return saveAndAppend(session, event, uniqueSessionId, true)
-                                    .invoke(() -> LoggingUtil.logDebug(LOG, "processStartEvent",
+                                    .invoke(() -> LoggingUtil.logDebug(LOG, METHOD_PROCESS_START_EVENT,
                                             "START event processed successfully: %s",
                                             session.getSessionId()));
                         }));
@@ -210,7 +213,7 @@ public class SessionService {
                         return existing.get();
                     }
                     LoggingUtil.logWarn(LOG, "getOrCreateSession",
-                            "Session not found for %s event: %s, creating new session",
+                            MSG_SESSION_NOT_FOUND_CREATING,
                             event.getEventType(), sessionId);
                     return createSession(event, sessionId);
                 });
@@ -233,7 +236,7 @@ public class SessionService {
                         return new SessionLookup(session, previousUsage);
                     }
                     LoggingUtil.logWarn(LOG, "getOrCreateSessionTrackingUsage",
-                            "Session not found for %s event: %s, creating new session",
+                            MSG_SESSION_NOT_FOUND_CREATING,
                             event.getEventType(), sessionId);
                     return new SessionLookup(createSession(event, sessionId), 0L);
                 });

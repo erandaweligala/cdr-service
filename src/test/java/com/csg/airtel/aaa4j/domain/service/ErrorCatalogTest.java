@@ -6,6 +6,8 @@ import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Tags;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+import jakarta.ws.rs.WebApplicationException;
+import jakarta.ws.rs.core.Response;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -39,7 +41,7 @@ class ErrorCatalogTest {
     void oneFaultSeenManyTimesIsOneRowWithAnOccurrenceCount() {
         // Same duplicate-key rejection three times, each carrying a different row id.
         for (int i = 0; i < 3; i++) {
-            catalog.record(new SQLException("ORA-00001: unique constraint (AAA.PK_SESSION) violated on id " + i),
+            catalog.recordOccurrence(new SQLException("ORA-00001: unique constraint (AAA.PK_SESSION) violated on id " + i),
                     "SQLException", "repository", "oracle");
         }
 
@@ -56,7 +58,7 @@ class ErrorCatalogTest {
 
     @Test
     void theUnredactedMessageAndThrowingFrameAreKept() {
-        catalog.record(new SQLException("ORA-00001: unique constraint violated on id 88213"),
+        catalog.recordOccurrence(new SQLException("ORA-00001: unique constraint violated on id 88213"),
                 "SQLException", "repository", "oracle");
 
         ErrorCatalog.ErrorSummary row = catalog.snapshot().get(0);
@@ -68,8 +70,8 @@ class ErrorCatalogTest {
 
     @Test
     void occurrencesAreExportedToPrometheus() {
-        catalog.record(new SQLException("ORA-12541: TNS:no listener"), "SQLException", "repository", "oracle");
-        catalog.record(new SQLException("ORA-12541: TNS:no listener"), "SQLException", "repository", "oracle");
+        catalog.recordOccurrence(new SQLException("ORA-12541: TNS:no listener"), "SQLException", "repository", "oracle");
+        catalog.recordOccurrence(new SQLException("ORA-12541: TNS:no listener"), "SQLException", "repository", "oracle");
 
         Counter counter = registry.find("application_error_occurrences")
                 .tags(Tags.of(
@@ -87,10 +89,10 @@ class ErrorCatalogTest {
     @Test
     void theLoudestErrorIsAlwaysTheFirstRow() {
         for (int i = 0; i < 2; i++) {
-            catalog.record(new RuntimeException("Connection reset by peer"), "RuntimeException", "repository", "oracle");
+            catalog.recordOccurrence(new RuntimeException("Connection reset by peer"), "RuntimeException", "repository", "oracle");
         }
         for (int i = 0; i < 7; i++) {
-            catalog.record(new SQLException("ORA-12541: TNS:no listener"), "SQLException", "repository", "oracle");
+            catalog.recordOccurrence(new SQLException("ORA-12541: TNS:no listener"), "SQLException", "repository", "oracle");
         }
 
         List<ErrorCatalog.ErrorSummary> rows = catalog.snapshot();
@@ -104,8 +106,8 @@ class ErrorCatalogTest {
     @Test
     void distinctFaultsFromOneExceptionClassAreNotConflated() {
         // The whole point: SQLException alone is not an identity.
-        catalog.record(new SQLException("ORA-00001: unique constraint violated"), "SQLException", "repository", "oracle");
-        catalog.record(new SQLException("ORA-12541: TNS:no listener"), "SQLException", "repository", "oracle");
+        catalog.recordOccurrence(new SQLException("ORA-00001: unique constraint violated"), "SQLException", "repository", "oracle");
+        catalog.recordOccurrence(new SQLException("ORA-12541: TNS:no listener"), "SQLException", "repository", "oracle");
 
         List<ErrorCatalog.ErrorSummary> rows = catalog.snapshot();
         assertEquals(2, rows.size());
@@ -114,8 +116,8 @@ class ErrorCatalogTest {
 
     @Test
     void attributionToLayerAndSourceIsPreserved() {
-        catalog.record(new RuntimeException("boom"), "RuntimeException", "repository", "oracle");
-        catalog.record(new RuntimeException("boom"), "RuntimeException", "consumer", "kafka");
+        catalog.recordOccurrence(new RuntimeException("boom"), "RuntimeException", "repository", "oracle");
+        catalog.recordOccurrence(new RuntimeException("boom"), "RuntimeException", "consumer", "kafka");
         assertEquals(2, catalog.snapshot().size());
     }
 
@@ -123,7 +125,7 @@ class ErrorCatalogTest {
     void cardinalityIsCappedAndTheTotalStaysExact() {
         int over = ErrorCatalog.MAX_SIGNATURES + 250;
         for (int i = 0; i < over; i++) {
-            catalog.record(new RuntimeException("failure kind zz" + i + " qq" + i),
+            catalog.recordOccurrence(new RuntimeException("failure kind zz" + i + " qq" + i),
                     "RuntimeException" + i, "service", "internal");
         }
 
@@ -144,10 +146,10 @@ class ErrorCatalogTest {
 
     @Test
     void recordingIsNullSafe() {
-        catalog.record(null, "RuntimeException", "service", "internal");
+        catalog.recordOccurrence(null, "RuntimeException", "service", "internal");
         assertEquals(0L, catalog.totalOccurrences());
 
-        catalog.record(new RuntimeException((String) null), "RuntimeException", null, null);
+        catalog.recordOccurrence(new RuntimeException((String) null), "RuntimeException", null, null);
         ErrorCatalog.ErrorSummary row = catalog.snapshot().get(0);
         assertEquals(1L, catalog.totalOccurrences());
         assertEquals(ErrorSignatures.NO_REASON, row.reason());
@@ -164,10 +166,44 @@ class ErrorCatalogTest {
         assertTrue(catalog.snapshot().isEmpty());
     }
     @Test
+    void sqlExceptionWithoutAMessageCodeFallsBackToSqlState() {
+        catalog.recordOccurrence(new SQLException("connection lost", "08006"),
+                "SQLException", "repository", "oracle");
+
+        assertEquals("SQLSTATE-08006", catalog.snapshot().get(0).code());
+    }
+
+    @Test
+    void sqlExceptionWithoutAMessageCodeOrSqlStateFallsBackToVendorCode() {
+        catalog.recordOccurrence(new SQLException("connection lost", null, 12345),
+                "SQLException", "repository", "oracle");
+
+        assertEquals("SQL-12345", catalog.snapshot().get(0).code());
+    }
+
+    @Test
+    void sqlExceptionWithNoCodeAtAllReportsNoCode() {
+        catalog.recordOccurrence(new SQLException("connection lost"),
+                "SQLException", "repository", "oracle");
+
+        assertEquals(ErrorSignatures.NO_CODE, catalog.snapshot().get(0).code());
+    }
+
+    @Test
+    void webApplicationExceptionUsesItsHttpStatusAsTheCode() {
+        WebApplicationException webEx = new WebApplicationException("not found",
+                Response.Status.NOT_FOUND);
+
+        catalog.recordOccurrence(webEx, "WebApplicationException", "resource", "internal");
+
+        assertEquals("HTTP-404", catalog.snapshot().get(0).code());
+    }
+
+    @Test
     void theApplicationsOwnResponseCodeWinsOverTheMessage() {
         // When the code has already been decided by the application, that is the most
         // authoritative answer available and must be what the catalog reports.
-        catalog.record(new BaseException("session not found", "no CDR for session", 404, "CDR-4040"),
+        catalog.recordOccurrence(new BaseException("session not found", "no CDR for session", 404, "CDR-4040"),
                 "BaseException", "service", "internal");
 
         assertEquals("CDR-4040", catalog.snapshot().get(0).code());

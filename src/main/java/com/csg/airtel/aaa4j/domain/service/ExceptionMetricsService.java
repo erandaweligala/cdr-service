@@ -191,7 +191,7 @@ public class ExceptionMetricsService {
         if (errorCatalog == null) {
             return;
         }
-        errorCatalog.record(root, type, layer.label(), source.label());
+        errorCatalog.recordOccurrence(root, type, layer.label(), source.label());
     }
 
     /**
@@ -302,7 +302,7 @@ public class ExceptionMetricsService {
         }
         try {
             root.addSuppressed(new RecordedMarker());
-        } catch (Throwable ignore) {
+        } catch (Exception ignore) {
             // Some throwables disable suppression; fall through and record anyway.
         }
         return true;
@@ -339,7 +339,7 @@ public class ExceptionMetricsService {
             if (ctx != null) {
                 return "v" + System.identityHashCode(ctx);
             }
-        } catch (Throwable ignore) {
+        } catch (Exception ignore) {
             // Fall through to thread-name fallback.
         }
         return "t" + Thread.currentThread().getName();

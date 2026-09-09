@@ -3,6 +3,7 @@ package com.csg.airtel.aaa4j.domain.resource;
 import com.csg.airtel.aaa4j.domain.model.BaseResponse;
 import com.csg.airtel.aaa4j.domain.model.connectionhistory.Session;
 import com.csg.airtel.aaa4j.domain.model.connectionhistory.SessionInstanceInfo;
+import com.csg.airtel.aaa4j.domain.model.connectionhistory.SessionSearchCriteria;
 import com.csg.airtel.aaa4j.domain.service.connectionhistory.ConnectionHistoryService;
 import com.csg.airtel.aaa4j.domain.util.exceptions.BaseException;
 import io.smallrye.mutiny.Uni;
@@ -46,25 +47,29 @@ class ConnectionHistoryResourceTest {
         int pageSize = 10;
         int page = 1;
 
-        when(connectionHistoryService.fetchSessionDetails(
-                username, connectionStatus, sessionId, groupId,
-                startTime, endTime, pageSize, page
-        )).thenReturn(Uni.createFrom().item(sessionResponse));
+        SessionSearchParams params = new SessionSearchParams();
+        params.username = username;
+        params.connectionStatus = connectionStatus;
+        params.sessionId = sessionId;
+        params.groupId = groupId;
+        params.startTime = startTime;
+        params.endTime = endTime;
+        params.pageSize = pageSize;
+        params.page = page;
 
-        Response response = connectionHistoryResource.getSessions(
-                username, connectionStatus, sessionId, groupId,
-                startTime, endTime, pageSize, page
-        ).await().indefinitely();
+        SessionSearchCriteria expectedCriteria = new SessionSearchCriteria(
+                username, connectionStatus, sessionId, groupId, startTime, endTime, pageSize, page);
+
+        when(connectionHistoryService.fetchSessionDetails(expectedCriteria))
+                .thenReturn(Uni.createFrom().item(sessionResponse));
+
+        Response response = connectionHistoryResource.getSessions(params).await().indefinitely();
 
         assertNotNull(response);
         assertEquals(Response.Status.OK.getStatusCode(), response.getStatus());
         assertEquals(sessionResponse, response.getEntity());
 
-        verify(connectionHistoryService, times(1))
-                .fetchSessionDetails(
-                        username, connectionStatus, sessionId, groupId,
-                        startTime, endTime, pageSize, page
-                );
+        verify(connectionHistoryService, times(1)).fetchSessionDetails(expectedCriteria);
         verifyNoMoreInteractions(connectionHistoryService);
     }
 

@@ -18,6 +18,7 @@ import java.net.ConnectException;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -246,6 +247,50 @@ class ConnectivityMonitoringServiceTest {
 
         assertEquals(1.0, failureCounter("elasticsearch", ConnectivityFailureReason.SERVICE_UNAVAILABLE).count());
         assertEquals(1.0, gauge("dependency_consecutive_failure_count", "elasticsearch"));
+    }
+
+    @Test
+    void redisProbeSynchronousFailureIsTreatedAsAnOutage() {
+        when(redisDataSource.execute("PING")).thenThrow(new IllegalStateException("client closed"));
+
+        for (int i = 0; i < FAILURE_THRESHOLD; i++) {
+            service.probeRedis();
+        }
+
+        assertFalse(service.isUp(ConnectivityMonitoringService.Dependency.REDIS));
+        assertNotNull(registry.find("dependency.probe.latency")
+                .tags(Tags.of("dependency", "redis", "outcome", "failure")).timer());
+    }
+
+    @Test
+    void kafkaProbeAgainstAnUnreachableBrokerRecordsFailureAndClosesCleanly() {
+        when(config.probeTimeoutMs()).thenReturn(200L);
+
+        for (int i = 0; i < FAILURE_THRESHOLD; i++) {
+            service.probeKafka();
+        }
+
+        assertFalse(service.isUp(ConnectivityMonitoringService.Dependency.KAFKA));
+        assertNotNull(registry.find("dependency.probe.latency")
+                .tags(Tags.of("dependency", "kafka", "outcome", "failure")).timer());
+
+        // The lazily-created AdminClient must be closeable without throwing.
+        service.close();
+    }
+
+    @Test
+    void closeIsANoOpWhenNoKafkaAdminClientWasEverCreated() {
+        assertDoesNotThrow(() -> service.close());
+    }
+
+    @Test
+    void downtimeGaugeReflectsElapsedTimeWhileDependencyIsDown() {
+        for (int i = 0; i < FAILURE_THRESHOLD; i++) {
+            service.recordFailure(ConnectivityMonitoringService.Dependency.ELASTICSEARCH,
+                    new ConnectException("Connection refused"));
+        }
+
+        assertTrue(gauge("dependency_downtime_seconds", "elasticsearch") >= 0.0);
     }
 
     @Test

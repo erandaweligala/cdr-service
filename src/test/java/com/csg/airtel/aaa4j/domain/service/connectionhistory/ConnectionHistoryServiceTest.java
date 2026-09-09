@@ -3,23 +3,30 @@ package com.csg.airtel.aaa4j.domain.service.connectionhistory;
 import co.elastic.clients.elasticsearch.ElasticsearchAsyncClient;
 import co.elastic.clients.elasticsearch._types.ElasticsearchException;
 import co.elastic.clients.elasticsearch._types.ErrorCause;
+import co.elastic.clients.elasticsearch._types.query_dsl.Query;
+import co.elastic.clients.elasticsearch.core.SearchRequest;
 import co.elastic.clients.elasticsearch.core.SearchResponse;
 import co.elastic.clients.elasticsearch.core.search.Hit;
 import co.elastic.clients.elasticsearch.core.search.HitsMetadata;
 import co.elastic.clients.elasticsearch.core.search.TotalHits;
 import co.elastic.clients.json.JsonData;
 import co.elastic.clients.transport.endpoints.BooleanResponse;
+import co.elastic.clients.util.ObjectBuilder;
 import com.csg.airtel.aaa4j.domain.model.BaseResponse;
 import com.csg.airtel.aaa4j.domain.model.connectionhistory.Session;
 import com.csg.airtel.aaa4j.domain.model.connectionhistory.SessionInstanceInfo;
+import com.csg.airtel.aaa4j.domain.model.connectionhistory.SessionSearchCriteria;
 import com.csg.airtel.aaa4j.domain.model.connectionhistory.SessionStatus;
+import com.csg.airtel.aaa4j.domain.service.ExceptionMetricsService;
 import com.csg.airtel.aaa4j.domain.util.exceptions.BaseException;
 import com.csg.airtel.aaa4j.domain.util.exceptions.ServiceExceptionHandler;
 import io.smallrye.mutiny.helpers.test.UniAssertSubscriber;
+import jakarta.enterprise.inject.Instance;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Answers;
+import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -71,10 +78,8 @@ class ConnectionHistoryServiceTest {
         SearchResponse<Session> mockResponse = createMockSearchResponse(Collections.singletonList(session), 1L);
         stubSearch(CompletableFuture.completedFuture(mockResponse));
 
-        BaseResponse<Session> result = service.fetchSessionDetails(
-                "user@test.com", "ACTIVE", "session-123", "group-001",
-                START_TIME, END_TIME, 10, 1
-        ).await().indefinitely();
+        BaseResponse<Session> result = service.fetchSessionDetails(new SessionSearchCriteria("user@test.com", "ACTIVE", "session-123", "group-001",
+                START_TIME, END_TIME, 10, 1)).await().indefinitely();
 
         assertNotNull(result);
         assertEquals(1, result.getData().size());
@@ -88,10 +93,8 @@ class ConnectionHistoryServiceTest {
         SearchResponse<Session> mockResponse = createMockSearchResponse(Collections.singletonList(session), 1L);
         stubSearch(CompletableFuture.completedFuture(mockResponse));
 
-        BaseResponse<Session> result = service.fetchSessionDetails(
-                null, null, null, null,
-                START_TIME, END_TIME, 10, 1
-        ).await().indefinitely();
+        BaseResponse<Session> result = service.fetchSessionDetails(new SessionSearchCriteria(null, null, null, null,
+                START_TIME, END_TIME, 10, 1)).await().indefinitely();
 
         assertNotNull(result);
         assertEquals(1, result.getData().size());
@@ -103,10 +106,8 @@ class ConnectionHistoryServiceTest {
         SearchResponse<Session> mockResponse = createMockSearchResponse(Collections.emptyList(), 0L);
         stubSearch(CompletableFuture.completedFuture(mockResponse));
 
-        BaseResponse<Session> result = service.fetchSessionDetails(
-                null, null, null, null,
-                START_TIME, END_TIME, 10, 1
-        ).await().indefinitely();
+        BaseResponse<Session> result = service.fetchSessionDetails(new SessionSearchCriteria(null, null, null, null,
+                START_TIME, END_TIME, 10, 1)).await().indefinitely();
 
         assertNotNull(result);
         assertTrue(result.getData().isEmpty());
@@ -120,10 +121,8 @@ class ConnectionHistoryServiceTest {
         SearchResponse<Session> mockResponse = createMockSearchResponse(Collections.singletonList(session), 1L);
         stubSearch(CompletableFuture.completedFuture(mockResponse));
 
-        BaseResponse<Session> result = service.fetchSessionDetails(
-                "user@test.com", null, null, null,
-                START_TIME, END_TIME, 10, 1
-        ).await().indefinitely();
+        BaseResponse<Session> result = service.fetchSessionDetails(new SessionSearchCriteria("user@test.com", null, null, null,
+                START_TIME, END_TIME, 10, 1)).await().indefinitely();
 
         assertEquals(1, result.getData().size());
     }
@@ -135,10 +134,8 @@ class ConnectionHistoryServiceTest {
         SearchResponse<Session> mockResponse = createMockSearchResponse(Collections.singletonList(session), 1L);
         stubSearch(CompletableFuture.completedFuture(mockResponse));
 
-        BaseResponse<Session> result = service.fetchSessionDetails(
-                null, "ACTIVE", null, null,
-                START_TIME, END_TIME, 10, 1
-        ).await().indefinitely();
+        BaseResponse<Session> result = service.fetchSessionDetails(new SessionSearchCriteria(null, "ACTIVE", null, null,
+                START_TIME, END_TIME, 10, 1)).await().indefinitely();
 
         assertEquals(1, result.getData().size());
     }
@@ -150,10 +147,8 @@ class ConnectionHistoryServiceTest {
         SearchResponse<Session> mockResponse = createMockSearchResponse(Collections.singletonList(session), 1L);
         stubSearch(CompletableFuture.completedFuture(mockResponse));
 
-        BaseResponse<Session> result = service.fetchSessionDetails(
-                null, null, "session-123", null,
-                START_TIME, END_TIME, 10, 1
-        ).await().indefinitely();
+        BaseResponse<Session> result = service.fetchSessionDetails(new SessionSearchCriteria(null, null, "session-123", null,
+                START_TIME, END_TIME, 10, 1)).await().indefinitely();
 
         assertEquals(1, result.getData().size());
     }
@@ -165,10 +160,8 @@ class ConnectionHistoryServiceTest {
         SearchResponse<Session> mockResponse = createMockSearchResponse(Collections.singletonList(session), 1L);
         stubSearch(CompletableFuture.completedFuture(mockResponse));
 
-        BaseResponse<Session> result = service.fetchSessionDetails(
-                null, null, null, "group-001",
-                START_TIME, END_TIME, 10, 1
-        ).await().indefinitely();
+        BaseResponse<Session> result = service.fetchSessionDetails(new SessionSearchCriteria(null, null, null, "group-001",
+                START_TIME, END_TIME, 10, 1)).await().indefinitely();
 
         assertEquals(1, result.getData().size());
     }
@@ -180,11 +173,9 @@ class ConnectionHistoryServiceTest {
         SearchResponse<Session> mockResponse = createMockSearchResponse(Collections.singletonList(session), 1L);
         stubSearch(CompletableFuture.completedFuture(mockResponse));
 
-        BaseResponse<Session> result = service.fetchSessionDetails(
-                null, null, null, null,
+        BaseResponse<Session> result = service.fetchSessionDetails(new SessionSearchCriteria(null, null, null, null,
                 "2024-01-01T00:00:00", "2024-01-03T23:59:59",
-                10, 1
-        ).await().indefinitely();
+                10, 1)).await().indefinitely();
 
         assertEquals(1, result.getData().size());
     }
@@ -196,11 +187,9 @@ class ConnectionHistoryServiceTest {
         SearchResponse<Session> mockResponse = createMockSearchResponse(Collections.singletonList(session), 1L);
         stubSearch(CompletableFuture.completedFuture(mockResponse));
 
-        BaseResponse<Session> result = service.fetchSessionDetails(
-                null, null, null, null,
+        BaseResponse<Session> result = service.fetchSessionDetails(new SessionSearchCriteria(null, null, null, null,
                 "2024-01-15T00:00:00", "2024-01-15T23:59:59",
-                10, 1
-        ).await().indefinitely();
+                10, 1)).await().indefinitely();
 
         assertEquals(1, result.getData().size());
     }
@@ -209,15 +198,66 @@ class ConnectionHistoryServiceTest {
     void testFetchSessionDetails_NoIndicesExist_ReturnsEmpty() {
         stubAllIndicesExist(false);
 
-        BaseResponse<Session> result = service.fetchSessionDetails(
-                null, null, null, null,
-                START_TIME, END_TIME, 10, 1
-        ).await().indefinitely();
+        BaseResponse<Session> result = service.fetchSessionDetails(new SessionSearchCriteria(null, null, null, null,
+                START_TIME, END_TIME, 10, 1)).await().indefinitely();
 
         assertNotNull(result);
         assertTrue(result.getData().isEmpty());
         assertEquals(0L, result.getPageDetails().getTotalRecords());
         verify(client, never()).search(any(Function.class), eq(Session.class));
+    }
+
+    // ============ Search request construction ============
+    //
+    // client.search(...) is stubbed directly (stubSearch), so the Function passed as its
+    // first argument is never actually invoked by Mockito. These tests capture that
+    // Function and apply it to a real SearchRequest.Builder to exercise the query-building
+    // logic (buildSessionFilters/addTermFilter) for real.
+
+    @Test
+    void searchRequestIncludesEveryProvidedFilterAndTheDateRange() {
+        stubAllIndicesExist(true);
+        stubSearch(CompletableFuture.completedFuture(createMockSearchResponse(Collections.emptyList(), 0L)));
+
+        service.fetchSessionDetails(new SessionSearchCriteria(
+                "user@test.com", "ACTIVE", "session-123", "group-001",
+                START_TIME, END_TIME, 10, 2
+        )).await().indefinitely();
+
+        SearchRequest request = capturedSearchRequest();
+
+        assertEquals(10, request.size());
+        assertEquals(10, request.from()); // (pageSize * page) - pageSize = (10*2)-10
+        Query.Kind kindOfEachMust = Query.Kind.Term;
+        assertEquals(4, request.query().bool().must().size());
+        for (Query must : request.query().bool().must()) {
+            assertEquals(kindOfEachMust, must._kind());
+        }
+        assertEquals(1, request.query().bool().filter().size());
+    }
+
+    @Test
+    void searchRequestOmitsUnsetFiltersButAlwaysKeepsTheDateRange() {
+        stubAllIndicesExist(true);
+        stubSearch(CompletableFuture.completedFuture(createMockSearchResponse(Collections.emptyList(), 0L)));
+
+        service.fetchSessionDetails(new SessionSearchCriteria(
+                null, null, null, null,
+                START_TIME, END_TIME, 10, 1
+        )).await().indefinitely();
+
+        SearchRequest request = capturedSearchRequest();
+
+        assertEquals(0, request.query().bool().must().size());
+        assertEquals(1, request.query().bool().filter().size());
+    }
+
+    @SuppressWarnings("unchecked")
+    private SearchRequest capturedSearchRequest() {
+        ArgumentCaptor<Function<SearchRequest.Builder, ObjectBuilder<SearchRequest>>> captor =
+                ArgumentCaptor.forClass(Function.class);
+        verify(client, atLeastOnce()).search(captor.capture(), eq(Session.class));
+        return captor.getValue().apply(new SearchRequest.Builder()).build();
     }
 
     // ============ fetchSessionDetails Error Tests ============
@@ -231,9 +271,7 @@ class ConnectionHistoryServiceTest {
         stubSearch(CompletableFuture.failedFuture(esException));
         when(handler.elasticsearchExceptionHandler(any(Throwable.class))).thenReturn(handledException);
 
-        Throwable failure = service.fetchSessionDetails(
-                null, null, null, null, START_TIME, END_TIME, 10, 1
-        ).subscribe().withSubscriber(UniAssertSubscriber.create())
+        Throwable failure = service.fetchSessionDetails(new SessionSearchCriteria(null, null, null, null, START_TIME, END_TIME, 10, 1)).subscribe().withSubscriber(UniAssertSubscriber.create())
                 .awaitFailure()
                 .getFailure();
 
@@ -251,9 +289,7 @@ class ConnectionHistoryServiceTest {
         stubSearch(CompletableFuture.failedFuture(ioException));
         when(handler.elasticsearchExceptionHandler(any(Throwable.class))).thenReturn(handledException);
 
-        Throwable failure = service.fetchSessionDetails(
-                null, null, null, null, START_TIME, END_TIME, 10, 1
-        ).subscribe().withSubscriber(UniAssertSubscriber.create())
+        Throwable failure = service.fetchSessionDetails(new SessionSearchCriteria(null, null, null, null, START_TIME, END_TIME, 10, 1)).subscribe().withSubscriber(UniAssertSubscriber.create())
                 .awaitFailure()
                 .getFailure();
 
@@ -268,9 +304,7 @@ class ConnectionHistoryServiceTest {
 
         stubSearch(CompletableFuture.failedFuture(baseException));
 
-        Throwable failure = service.fetchSessionDetails(
-                null, null, null, null, START_TIME, END_TIME, 10, 1
-        ).subscribe().withSubscriber(UniAssertSubscriber.create())
+        Throwable failure = service.fetchSessionDetails(new SessionSearchCriteria(null, null, null, null, START_TIME, END_TIME, 10, 1)).subscribe().withSubscriber(UniAssertSubscriber.create())
                 .awaitFailure()
                 .getFailure();
 
@@ -288,9 +322,7 @@ class ConnectionHistoryServiceTest {
         stubSearch(CompletableFuture.failedFuture(unexpectedException));
         when(handler.serviceLayerExceptionHandler(any(Throwable.class))).thenReturn(handledException);
 
-        Throwable failure = service.fetchSessionDetails(
-                null, null, null, null, START_TIME, END_TIME, 10, 1
-        ).subscribe().withSubscriber(UniAssertSubscriber.create())
+        Throwable failure = service.fetchSessionDetails(new SessionSearchCriteria(null, null, null, null, START_TIME, END_TIME, 10, 1)).subscribe().withSubscriber(UniAssertSubscriber.create())
                 .awaitFailure()
                 .getFailure();
 
@@ -450,9 +482,7 @@ class ConnectionHistoryServiceTest {
         stubAllIndicesExist(true);
         stubSearch(CompletableFuture.completedFuture(createMockSearchResponse(Collections.emptyList(), 0L)));
 
-        BaseResponse<Session> result = service.fetchSessionDetails(
-                null, null, null, null, null, null, 10, 1
-        ).await().indefinitely();
+        BaseResponse<Session> result = service.fetchSessionDetails(new SessionSearchCriteria(null, null, null, null, null, null, 10, 1)).await().indefinitely();
 
         assertNotNull(result);
         // The default range is the last 8 local days, one index per day.
@@ -470,9 +500,7 @@ class ConnectionHistoryServiceTest {
         stubSearch(CompletableFuture.failedFuture(esException));
         when(handler.elasticsearchExceptionHandler(any(Throwable.class))).thenReturn(handledException);
 
-        Throwable failure = service.fetchSessionDetails(
-                null, null, null, null, START_TIME, END_TIME, 10, 1
-        ).subscribe().withSubscriber(UniAssertSubscriber.create())
+        Throwable failure = service.fetchSessionDetails(new SessionSearchCriteria(null, null, null, null, START_TIME, END_TIME, 10, 1)).subscribe().withSubscriber(UniAssertSubscriber.create())
                 .awaitFailure()
                 .getFailure();
 
@@ -488,9 +516,7 @@ class ConnectionHistoryServiceTest {
         stubSearch(CompletableFuture.failedFuture(esException));
         when(handler.elasticsearchExceptionHandler(any(Throwable.class))).thenReturn(handledException);
 
-        Throwable failure = service.fetchSessionDetails(
-                null, null, null, null, START_TIME, END_TIME, 10, 1
-        ).subscribe().withSubscriber(UniAssertSubscriber.create())
+        Throwable failure = service.fetchSessionDetails(new SessionSearchCriteria(null, null, null, null, START_TIME, END_TIME, 10, 1)).subscribe().withSubscriber(UniAssertSubscriber.create())
                 .awaitFailure()
                 .getFailure();
 
@@ -509,13 +535,54 @@ class ConnectionHistoryServiceTest {
         stubSearch(CompletableFuture.failedFuture(esException));
         when(handler.elasticsearchExceptionHandler(any(Throwable.class))).thenReturn(handledException);
 
-        Throwable failure = service.fetchSessionDetails(
-                null, null, null, null, START_TIME, END_TIME, 10, 1
-        ).subscribe().withSubscriber(UniAssertSubscriber.create())
+        Throwable failure = service.fetchSessionDetails(new SessionSearchCriteria(null, null, null, null, START_TIME, END_TIME, 10, 1)).subscribe().withSubscriber(UniAssertSubscriber.create())
                 .awaitFailure()
                 .getFailure();
 
         assertInstanceOf(BaseException.class, failure);
+    }
+
+    // ============ Failure mapping internals ============
+
+    @Test
+    void mappedFailuresAreForwardedToExceptionMetricsWhenAvailable() {
+        @SuppressWarnings("unchecked")
+        Instance<ExceptionMetricsService> metricsInstance = mock(Instance.class);
+        ExceptionMetricsService exceptionMetrics = mock(ExceptionMetricsService.class);
+        when(metricsInstance.isUnsatisfied()).thenReturn(false);
+        when(metricsInstance.get()).thenReturn(exceptionMetrics);
+        service.metrics = metricsInstance;
+
+        stubAllIndicesExist(true);
+        BaseException baseException = new BaseException("Custom Error", "CUSTOM", 400, "C001");
+        stubSearch(CompletableFuture.failedFuture(baseException));
+
+        Throwable failure = service.fetchSessionDetails(new SessionSearchCriteria(
+                null, null, null, null, START_TIME, END_TIME, 10, 1
+        )).subscribe().withSubscriber(UniAssertSubscriber.create())
+                .awaitFailure()
+                .getFailure();
+
+        assertInstanceOf(BaseException.class, failure);
+        verify(exceptionMetrics).recordException(baseException,
+                ExceptionMetricsService.Layer.SERVICE, ExceptionMetricsService.Source.INTERNAL);
+    }
+
+    @Test
+    void unwrapCompletionCauseUnwrapsCompletionAndExecutionExceptionsButLeavesOthersAlone() throws Exception {
+        java.lang.reflect.Method unwrap = ConnectionHistoryService.class.getDeclaredMethod(
+                "unwrapCompletionCause", Throwable.class);
+        unwrap.setAccessible(true);
+
+        IOException root = new IOException("boom");
+        assertEquals(root, unwrap.invoke(service, new java.util.concurrent.CompletionException(root)));
+        assertEquals(root, unwrap.invoke(service, new java.util.concurrent.ExecutionException(root)));
+
+        java.util.concurrent.CompletionException noCause = new java.util.concurrent.CompletionException(null);
+        assertEquals(noCause, unwrap.invoke(service, noCause));
+
+        RuntimeException plain = new RuntimeException("plain");
+        assertEquals(plain, unwrap.invoke(service, plain));
     }
 
     // ============ Helper Methods ============
