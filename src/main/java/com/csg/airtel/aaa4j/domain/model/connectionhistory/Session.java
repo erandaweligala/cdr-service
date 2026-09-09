@@ -22,6 +22,7 @@ public class Session {
     private Long usage;
     private String userName;
     private String groupId;
+    private String nasIpAddress;
     private Date updatedTime;
     private String indexName;
     @Builder.Default  // This ensures the list is initialized when using builder
