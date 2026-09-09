@@ -140,7 +140,42 @@ class AccountingKafkaConsumerTest {
 
     @Test
     void shouldPublishEvenWhenProcessingThrowsBeforeItStarts() {
-        // No payload: routing throws an NPE as soon as it reads the accounting details.
+        // Routing itself throws, rather than returning a failed Uni.
+        AccountingEvent event = event("ACCOUNTING_START");
+        when(sessionService.processStartEvent(any()))
+                .thenThrow(new IllegalStateException("boom"));
+
+        assertNull(consumer.consume(Message.of(event)).await().indefinitely());
+
+        verify(airtelEventPublisher).publish(eq(event), any());
+    }
+
+    /**
+     * Not every event carries an accounting block: a COA payload carries {@code coa} instead, and
+     * a malformed record may carry no payload at all. Reading it unguarded to log the usage threw
+     * an NPE that stopped the event being routed at all.
+     */
+    @Test
+    void shouldRouteAnEventWithNoAccountingBlock() {
+        AccountingEvent event = AccountingEvent.builder()
+                .eventId("event-1")
+                .eventType("COA_REQUEST")
+                .eventTimestamp(Instant.parse("2026-08-17T17:05:45.967Z"))
+                .partitionKey("session-1")
+                .payload(Payload.builder()
+                        .session(SessionCdr.builder().sessionId("session-1").build())
+                        .build())
+                .build();
+
+        assertNull(consumer.consume(Message.of(event)).await().indefinitely());
+
+        verify(sessionService).processCoaRequestEvent(event);
+        verify(airtelEventPublisher).publish(eq(event), any());
+    }
+
+    /** A record with no payload at all must be routed too, not dropped by an NPE. */
+    @Test
+    void shouldRouteAnEventWithNoPayload() {
         AccountingEvent event = AccountingEvent.builder()
                 .eventId("event-1")
                 .eventType("ACCOUNTING_START")
@@ -149,8 +184,8 @@ class AccountingKafkaConsumerTest {
 
         assertNull(consumer.consume(Message.of(event)).await().indefinitely());
 
+        verify(sessionService).processStartEvent(event);
         verify(airtelEventPublisher).publish(eq(event), any());
-        verify(sessionService, never()).processStartEvent(any());
     }
 
     @Test

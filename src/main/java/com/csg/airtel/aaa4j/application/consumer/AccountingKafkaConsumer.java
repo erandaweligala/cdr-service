@@ -2,6 +2,7 @@ package com.csg.airtel.aaa4j.application.consumer;
 
 import com.csg.airtel.aaa4j.common.LoggingUtil;
 import com.csg.airtel.aaa4j.domain.client.AirtelEventPublisher;
+import com.csg.airtel.aaa4j.domain.model.connectionhistory.Accounting;
 import com.csg.airtel.aaa4j.domain.model.connectionhistory.AccountingEvent;
 import com.csg.airtel.aaa4j.domain.service.ExceptionMetricsService;
 import com.csg.airtel.aaa4j.domain.service.connectionhistory.SessionService;
@@ -176,8 +177,12 @@ public class AccountingKafkaConsumer {
 
         String eventType = event.getEventType();
 
+        Accounting accounting = accountingOf(event);
+
         LoggingUtil.logInfo(LOG,"processEvent","Received cdr request for event type: %s, session usage: %s, total usage: %s",
-                eventType,event.getPayload().getAccounting().getSessionUsage(),event.getPayload().getAccounting().getTotalUsage());
+                eventType,
+                accounting != null ? accounting.getSessionUsage() : null,
+                accounting != null ? accounting.getTotalUsage() : null);
 
         if (eventType == null) {
             handleInvalidEventType(event);
@@ -209,6 +214,17 @@ public class AccountingKafkaConsumer {
                 yield Uni.createFrom().voidItem();
             }
         };
+    }
+
+    /**
+     * Accounting block of an event's payload, or null when the event carries none.
+     *
+     * <p>Not every event type has one: a COA_REQUEST/COA_RESPONSE payload carries {@code coa}
+     * instead, and a malformed record may carry no payload at all. Reading it unguarded threw an
+     * NPE out of {@link #processEvent} before the event was ever routed.
+     */
+    private Accounting accountingOf(AccountingEvent event) {
+        return event.getPayload() != null ? event.getPayload().getAccounting() : null;
     }
 
     /**
