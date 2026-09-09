@@ -315,6 +315,7 @@ public class SessionService {
      */
     private Uni<Void> saveAndAppend(Session session, AccountingEvent event, String uniqueSessionId,
                                      boolean saveToRedis, Long instanceUsageOverride) {
+        populateNasIpAddress(session, event.getPayload());
         SessionInstanceInfo instanceInfo = createInstanceInfo(event, instanceUsageOverride);
 
         Uni<Void> redisSave = saveToRedis
@@ -402,6 +403,24 @@ public class SessionService {
         if (payload.getUser() != null) {
             session.setUserName(payload.getUser().getUserName());
             session.setGroupId(payload.getUser().getGroupId());
+        }
+    }
+
+    /**
+     * Record the NAS the session is anchored to, taken from the CDR every event type carries.
+     *
+     * <p>Done on the common persistence path rather than only at session creation so a session
+     * already cached in Redis — including one cached before this field existed — picks the
+     * address up from its next event instead of being indexed without it.
+     *
+     * <p>A payload that omits the address leaves the stored one alone: the Elasticsearch update
+     * merges the whole session document over what is already indexed, so writing null here would
+     * blank an address an earlier event had reported.
+     */
+    private void populateNasIpAddress(Session session, Payload payload) {
+        SessionCdr cdr = payload.getSession();
+        if (cdr != null && cdr.getNasIpAddress() != null) {
+            session.setNasIpAddress(cdr.getNasIpAddress());
         }
     }
 

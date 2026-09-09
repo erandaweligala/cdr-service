@@ -51,11 +51,13 @@ class SessionServiceTest {
     private Session existingSession;
     private String sessionId;
     private String nasPort;
+    private String nasIpAddress;
 
     @BeforeEach
     void setUp() {
         sessionId = "test-session-123";
         nasPort = "5060";
+        nasIpAddress = "10.20.30.40";
 
         existingSession = createTestSession();
 
@@ -604,6 +606,52 @@ class SessionServiceTest {
         assertEquals(HttpStatus.SC_BAD_REQUEST, exception.getHttpStatus());
     }
 
+    // ============ NAS IP address Tests ============
+
+    @Test
+    void testNasIpAddressRecordedOnNewSession() {
+        String uniqueSessionId = sessionId + nasPort;
+        when(redisRepository.findBySessionId(uniqueSessionId))
+                .thenReturn(Uni.createFrom().item(Optional.empty()));
+
+        sessionService.processStartEvent(startEvent).await().indefinitely();
+
+        ArgumentCaptor<Session> sessionCaptor = ArgumentCaptor.forClass(Session.class);
+        verify(elasticsearchService).appendInstance(sessionCaptor.capture(), eq(uniqueSessionId),
+                anyString(), any(SessionInstanceInfo.class));
+        assertEquals(nasIpAddress, sessionCaptor.getValue().getNasIpAddress());
+    }
+
+    @Test
+    void testNasIpAddressRecordedOnSessionCachedWithoutIt() {
+        String uniqueSessionId = sessionId + nasPort;
+        when(redisRepository.findBySessionId(uniqueSessionId))
+                .thenReturn(Uni.createFrom().item(Optional.of(existingSession)));
+
+        sessionService.processInterimEvent(interimEvent).await().indefinitely();
+
+        ArgumentCaptor<Session> sessionCaptor = ArgumentCaptor.forClass(Session.class);
+        verify(elasticsearchService).appendInstance(sessionCaptor.capture(), eq(uniqueSessionId),
+                anyString(), any(SessionInstanceInfo.class));
+        assertEquals(nasIpAddress, sessionCaptor.getValue().getNasIpAddress());
+    }
+
+    @Test
+    void testNasIpAddressKeptWhenEventOmitsIt() {
+        String uniqueSessionId = sessionId + nasPort;
+        existingSession.setNasIpAddress(nasIpAddress);
+        stopEvent.getPayload().getSession().setNasIpAddress(null);
+        when(redisRepository.findBySessionId(uniqueSessionId))
+                .thenReturn(Uni.createFrom().item(Optional.of(existingSession)));
+
+        sessionService.processStopEvent(stopEvent).await().indefinitely();
+
+        ArgumentCaptor<Session> sessionCaptor = ArgumentCaptor.forClass(Session.class);
+        verify(elasticsearchService).appendInstance(sessionCaptor.capture(), eq(uniqueSessionId),
+                anyString(), any(SessionInstanceInfo.class));
+        assertEquals(nasIpAddress, sessionCaptor.getValue().getNasIpAddress());
+    }
+
     // ============ Helper Methods ============
 
     /** Blocks for the result of {@code uni}, isolated so assertThrows lambdas make exactly one call. */
@@ -632,6 +680,7 @@ class SessionServiceTest {
         SessionCdr sessionCdr = SessionCdr.builder()
                 .sessionId(sessionId)
                 .nasPort(nasPort)
+                .nasIpAddress(nasIpAddress)
                 .startTime(Instant.now().minusSeconds(3600))
                 .sessionStopTime(stopTime)
                 .build();
@@ -672,6 +721,7 @@ class SessionServiceTest {
         SessionCdr sessionCdr = SessionCdr.builder()
                 .sessionId(sessionId)
                 .nasPort(nasPort)
+                .nasIpAddress(nasIpAddress)
                 .startTime(Instant.now().minusSeconds(3600))
                 .build();
 
