@@ -29,8 +29,9 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
- * Unit tests for AccountingKafkaConsumer, focused on the guarantee that every consumed event
- * reaches the Airtel topic — whatever its type, and whatever happens while it is processed.
+ * Unit tests for AccountingKafkaConsumer, focused on which consumed events reach the Airtel topic:
+ * every event off the primary channel — whatever its type, and whatever happens while it is
+ * processed — and none off the mirror channel, whose events the peer zone published already.
  */
 @ExtendWith(MockitoExtension.class)
 @MockitoSettings(strictness = Strictness.LENIENT)
@@ -47,6 +48,7 @@ class AccountingKafkaConsumerTest {
     @BeforeEach
     void setUp() {
         consumer = new AccountingKafkaConsumer(sessionService, airtelEventPublisher);
+        consumer.publishFromMirror = false;
 
         when(airtelEventPublisher.publish(any(), any())).thenReturn(Uni.createFrom().voidItem());
         when(sessionService.processStartEvent(any())).thenReturn(Uni.createFrom().voidItem());
@@ -90,8 +92,33 @@ class AccountingKafkaConsumerTest {
         verify(airtelEventPublisher).publish(eq(event), any());
     }
 
+    /**
+     * The peer zone published these events off its own primary channel, so republishing them here
+     * would put every CDR on the Airtel topic twice.
+     */
     @Test
-    void shouldPublishFromTheMirrorChannelToo() {
+    void shouldNotPublishFromTheMirrorChannel() {
+        AccountingEvent event = event("ACCOUNTING_START");
+
+        consumer.consumeCdrMirror(Message.of(event)).await().indefinitely();
+
+        verify(airtelEventPublisher, never()).publish(any(), any());
+    }
+
+    /** Not forwarding a mirrored event must not stop it being processed into Elasticsearch. */
+    @Test
+    void shouldStillProcessMirroredEventsForElasticsearch() {
+        AccountingEvent event = event("ACCOUNTING_START");
+
+        consumer.consumeCdrMirror(Message.of(event)).await().indefinitely();
+
+        verify(sessionService).processStartEvent(event);
+    }
+
+    /** The failover override: the peer is down, so this zone publishes its CDRs on its behalf. */
+    @Test
+    void shouldPublishFromTheMirrorChannelWhenTheOverrideIsOn() {
+        consumer.publishFromMirror = true;
         AccountingEvent event = event("ACCOUNTING_START");
 
         consumer.consumeCdrMirror(Message.of(event)).await().indefinitely();

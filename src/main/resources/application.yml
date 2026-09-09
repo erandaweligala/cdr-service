@@ -111,6 +111,14 @@ airtel:
     # stays queued in the producer (and is still delivered) but the consumer lane moves on, so an
     # Airtel outage cannot hold up CDR processing.
     publish-timeout-ms: "${AIRTEL_KAFKA_PUBLISH_TIMEOUT_MS:10000}"
+    # Whether CDRs that arrived on the mirror channel (produced in the peer zone, replicated here
+    # by MirrorMaker) are forwarded to the Airtel topic too. Off: both zones run this service
+    # against the same Airtel topic, so the peer already published them off its own primary
+    # channel and forwarding them again put every CDR on that topic twice. Mirrored CDRs are
+    # still processed and indexed in Elasticsearch exactly as before — only the Airtel forward
+    # is skipped. Turn it on in the surviving zone during a failover, while the peer's
+    # cdr-service is down but its CDRs still arrive by mirroring, and off again once it is back.
+    publish-from-mirror: "${AIRTEL_KAFKA_PUBLISH_FROM_MIRROR:false}"
 
 mp:
   messaging:
@@ -210,9 +218,11 @@ mp:
         concurrency: 6
 
     outgoing:
-      # Airtel's copy of the CDR stream. Every consumed AccountingEvent is republished here
-      # unchanged — the same object, serialized by the same application ObjectMapper the incoming
-      # channel deserialized it with, so the JSON on this topic matches the JSON that was consumed.
+      # Airtel's copy of the CDR stream. Every AccountingEvent consumed from this zone's own CDR
+      # topic is republished here unchanged — the same object, serialized by the same application
+      # ObjectMapper the incoming channel deserialized it with, so the JSON on this topic matches
+      # the JSON that was consumed. Mirrored events are not republished (see publish-from-mirror
+      # above): the zone that produced them publishes them, so each CDR is published exactly once.
       airtel-accounting-events:
         connector: smallrye-kafka
         topic: "${airtel.kafka.topic}"
