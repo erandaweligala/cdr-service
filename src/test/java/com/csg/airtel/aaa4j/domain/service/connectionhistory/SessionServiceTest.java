@@ -21,7 +21,9 @@ import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Date;
+import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
@@ -156,6 +158,123 @@ class SessionServiceTest {
         ArgumentCaptor<SessionInstanceInfo> instanceCaptor = ArgumentCaptor.forClass(SessionInstanceInfo.class);
         verify(elasticsearchService).appendInstance(any(Session.class), eq(uniqueSessionId), anyString(), instanceCaptor.capture());
         assertEquals(512L, instanceCaptor.getValue().getUsage());
+    }
+
+    // ============ 32-bit Counter Regression Tests ============
+
+    /** A -10 byte counter regression as it arrives from a 32-bit upstream: 2^32 - 10. */
+    private static final long WRAPPED_MINUS_TEN = 4294967286L;
+
+    @Test
+    void testProcessInterimEvent_WrappedSessionUsageIsNotCreditedAsUsage() {
+        String uniqueSessionId = sessionId + nasPort;
+        // The counters disagree, so the fallback to the payload runs — and the payload's own
+        // sessionUsage carries the wrap, which is how 4.29 GB used to reach the index.
+        existingSession.setUsage(5000L);
+        interimEvent.getPayload().getAccounting().setSessionUsage(WRAPPED_MINUS_TEN);
+        when(redisRepository.findBySessionId(uniqueSessionId))
+                .thenReturn(Uni.createFrom().item(Optional.of(existingSession)));
+
+        sessionService.processInterimEvent(interimEvent).await().indefinitely();
+
+        assertEquals(0L, capturedInstanceUsage(uniqueSessionId));
+    }
+
+    @Test
+    void testProcessInterimEvent_WrappedDeltaFallsBackInsteadOfBeingStored() {
+        String uniqueSessionId = sessionId + nasPort;
+        // previousUsage 10 against a totalUsage of 2^32 makes the delta itself the wrapped -10.
+        existingSession.setUsage(10L);
+        interimEvent.getPayload().getAccounting().setTotalUsage(4294967296L);
+        when(redisRepository.findBySessionId(uniqueSessionId))
+                .thenReturn(Uni.createFrom().item(Optional.of(existingSession)));
+
+        sessionService.processInterimEvent(interimEvent).await().indefinitely();
+
+        // The payload's sessionUsage (512) is sane here, so it is still what gets recorded —
+        // what must not happen is the wrapped delta being stored as 4.29 GB of volume.
+        assertEquals(512L, capturedInstanceUsage(uniqueSessionId));
+    }
+
+    @Test
+    void testProcessStartEvent_WrappedSessionUsageIsNotCreditedAsUsage() {
+        String uniqueSessionId = sessionId + nasPort;
+        // START derives no delta, so its instance usage is the payload's figure taken directly.
+        startEvent.getPayload().getAccounting().setSessionUsage(WRAPPED_MINUS_TEN);
+        when(redisRepository.findBySessionId(uniqueSessionId))
+                .thenReturn(Uni.createFrom().item(Optional.empty()));
+
+        sessionService.processStartEvent(startEvent).await().indefinitely();
+
+        assertEquals(0L, capturedInstanceUsage(uniqueSessionId));
+    }
+
+    @Test
+    void testProcessInterimEvent_GenuineLargeDeltaSurvives() {
+        String uniqueSessionId = sessionId + nasPort;
+        // 3 GB in one interval is below the wrap window, so it is volume and stays volume.
+        existingSession.setUsage(0L);
+        interimEvent.getPayload().getAccounting().setTotalUsage(3_000_000_000L);
+        when(redisRepository.findBySessionId(uniqueSessionId))
+                .thenReturn(Uni.createFrom().item(Optional.of(existingSession)));
+
+        sessionService.processInterimEvent(interimEvent).await().indefinitely();
+
+        assertEquals(3_000_000_000L, capturedInstanceUsage(uniqueSessionId));
+    }
+
+    @Test
+    void testReportedEventSequenceSumsToTheBytesActuallyDrawn() {
+        String uniqueSessionId = sessionId + nasPort;
+        AtomicReference<Session> redis = new AtomicReference<>();
+        when(redisRepository.findBySessionId(uniqueSessionId))
+                .thenAnswer(invocation -> Uni.createFrom().item(Optional.ofNullable(redis.get())));
+        when(redisRepository.save(any(Session.class), anyString()))
+                .thenAnswer(invocation -> {
+                    redis.set(invocation.getArgument(0));
+                    return Uni.createFrom().voidItem();
+                });
+
+        // The four events as they were reported, in order. The session moved 10 bytes and then
+        // its counter went backwards by 10 — twice over, once through each path into the index.
+        sessionService.processStartEvent(
+                usageEvent(EventTypes.ACCOUNTING_START.toString(), 0L, 0L)).await().indefinitely();
+        sessionService.processInterimEvent(
+                usageEvent(EventTypes.ACCOUNTING_INTERIM.toString(), 10L, 10L)).await().indefinitely();
+        sessionService.processInterimEvent(
+                usageEvent(EventTypes.ACCOUNTING_INTERIM.toString(), 0L, WRAPPED_MINUS_TEN)).await().indefinitely();
+        sessionService.processInterimEvent(
+                usageEvent(EventTypes.ACCOUNTING_INTERIM.toString(), WRAPPED_MINUS_TEN, WRAPPED_MINUS_TEN))
+                .await().indefinitely();
+
+        ArgumentCaptor<SessionInstanceInfo> instances = ArgumentCaptor.forClass(SessionInstanceInfo.class);
+        verify(elasticsearchService, times(4))
+                .appendInstance(any(Session.class), eq(uniqueSessionId), anyString(), instances.capture());
+
+        List<Long> recorded = instances.getAllValues().stream()
+                .map(SessionInstanceInfo::getUsage)
+                .toList();
+        assertEquals(List.of(0L, 10L, 0L, 0L), recorded);
+
+        // What the dump sums into UTLIZED_QUOTA: 10 bytes, not the 8.59 GB the two wrapped
+        // instances were contributing.
+        assertEquals(10L, recorded.stream().mapToLong(Long::longValue).sum());
+    }
+
+    /** The single instance appended for {@code uniqueSessionId}, as the usage it recorded. */
+    private long capturedInstanceUsage(String uniqueSessionId) {
+        ArgumentCaptor<SessionInstanceInfo> instance = ArgumentCaptor.forClass(SessionInstanceInfo.class);
+        verify(elasticsearchService).appendInstance(
+                any(Session.class), eq(uniqueSessionId), anyString(), instance.capture());
+        return instance.getValue().getUsage();
+    }
+
+    /** An event of {@code eventType} carrying exactly the two usage figures given. */
+    private AccountingEvent usageEvent(String eventType, long totalUsage, long sessionUsage) {
+        AccountingEvent event = createAccountingEvent(eventType, null);
+        event.getPayload().getAccounting().setTotalUsage(totalUsage);
+        event.getPayload().getAccounting().setSessionUsage(sessionUsage);
+        return event;
     }
 
     // ============ ACCOUNTING_STOP Tests ============

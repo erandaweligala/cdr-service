@@ -189,6 +189,42 @@ query_shard_exception: failed to create query: For input string: "2026-08-16T00:
 Set `elasticsearch.index-template.enabled=false` if the template is managed
 outside the application.
 
+### Session instance usage, and 32-bit counter regressions
+
+Each entry in `sessionInstances` carries the usage for one accounting event, as a
+delta: the difference between the cumulative `totalUsage` that event reported and
+the one stored from the event before it. No running total is kept, so summing the
+deltas is what reconstructs a total — which is what the USER_DATA_DUMP report's
+`UTLIZED_QUOTA` column does.
+
+That makes it worth knowing that not every figure arriving on an event is volume.
+RADIUS counts bytes in `Acct-Input-Octets` and `Acct-Output-Octets`, which are
+32-bit — the reason `Acct-Input-Gigawords` exists — so when a counter behind one
+of these differences goes backwards (a NAS re-syncing mid-session, a rating
+correction, a bucket refund) the subtraction happens in 32-bit arithmetic and a
+small negative comes out the far side of 2³². **A regression of ten bytes arrives
+as 4294967286**, and stored as a delta it is 4.29 GB of usage the subscriber never
+drew.
+
+`UsageCounters` is what recognises those. Anything landing in the 1 GiB band just
+below 2³² is read as the negative it is, and an event whose counter went backwards
+records 0 usage rather than the wrapped figure — an event that drew nothing is what
+a regression describes. Both routes to the stored value go through it: the delta
+`SessionService` derives, and the payload's own `sessionUsage`, which the events
+that derive no delta (`ACCOUNTING_START`, the COA pair) use directly and which is
+computed upstream in the same 32-bit arithmetic. Only that band is treated as a
+wrap, so a session that genuinely moved more than 4.29 GB is recorded in full.
+
+Each one is logged as it is caught:
+
+```
+WARN [computeInstanceUsage] Negative usage delta detected (previousUsage=10, newTotalUsage=0); falling back to payload sessionUsage
+WARN [sessionUsageFallback] Payload sessionUsage is a counter regression too (previousUsage=10, newTotalUsage=0, sessionUsage=-10); recording 0 usage for this event
+```
+
+A steady stream of them is worth taking upstream — it means the CDRs are reporting
+counters that regress — but it is no longer something the reports inherit.
+
 ### Repairing an index that predates the template
 
 A template is applied only when an index is created, so an existing index keeps

@@ -3,6 +3,7 @@ package com.csg.airtel.aaa4j.domain.service.connectionhistory;
 import com.csg.airtel.aaa4j.common.LoggingUtil;
 import com.csg.airtel.aaa4j.domain.model.connectionhistory.*;
 import com.csg.airtel.aaa4j.domain.util.ResponseCodeEnum;
+import com.csg.airtel.aaa4j.domain.util.UsageCounters;
 import com.csg.airtel.aaa4j.domain.util.exceptions.BaseException;
 import com.csg.airtel.aaa4j.repository.SessionRedisRepository;
 import io.smallrye.mutiny.Uni;
@@ -247,17 +248,45 @@ public class SessionService {
      * totalUsage and the previously stored session.usage. Falls back to the payload's own
      * sessionUsage when the delta would be negative (e.g. an upstream counter rollback) since
      * a negative usage figure cannot be trusted.
+     *
+     * <p>The delta is read through {@link UsageCounters}, because a counter that went backwards
+     * upstream does not reach us as a negative — it reaches us wrapped, as a number just under
+     * 2<sup>32</sup>, and sails straight past a {@code < 0} test. The cumulative counters
+     * themselves are left alone: totalUsage is a 64-bit running total that passes 2<sup>32</sup>
+     * on any long session, so only the per-event figure they produce is a wrap candidate.
      */
     private Long computeInstanceUsage(long previousUsage, Long newTotalUsage, Payload payload) {
         long currentUsage = newTotalUsage != null ? newTotalUsage : 0L;
-        long delta = currentUsage - previousUsage;
+        long delta = UsageCounters.unwrap(currentUsage - previousUsage);
         if (delta < 0) {
             LoggingUtil.logWarn(LOG, "computeInstanceUsage",
                     "Negative usage delta detected (previousUsage=%d, newTotalUsage=%d); falling back to payload sessionUsage",
                     previousUsage, currentUsage);
-            return getSessionUsageFromPayload(payload);
+            return sessionUsageFallback(payload, previousUsage, currentUsage);
         }
         return delta;
+    }
+
+    /**
+     * The payload's own sessionUsage, used when the cumulative counters disagree — but only when
+     * it is a figure worth having.
+     *
+     * <p>This fallback is where the wrapped values were getting in. sessionUsage is computed by
+     * whatever produced the CDR, in the same 32-bit arithmetic, so the event whose counters just
+     * went backwards is precisely the event whose sessionUsage is likely to carry the wrap. An
+     * event that reports its own usage as negative drew nothing, and 0 is what that is worth;
+     * taking the wrapped figure instead credited the subscriber with 4.29 GB.
+     */
+    private Long sessionUsageFallback(Payload payload, long previousUsage, long currentUsage) {
+        long reported = UsageCounters.unwrap(getSessionUsageFromPayload(payload));
+        if (reported < 0) {
+            LoggingUtil.logWarn(LOG, "sessionUsageFallback",
+                    "Payload sessionUsage is a counter regression too (previousUsage=%d, newTotalUsage=%d, "
+                            + "sessionUsage=%d); recording 0 usage for this event",
+                    previousUsage, currentUsage, reported);
+            return 0L;
+        }
+        return reported;
     }
 
     /**
@@ -434,7 +463,14 @@ public class SessionService {
     }
 
     /**
-     * Create SessionInstanceInfo from event
+     * Create SessionInstanceInfo from event.
+     *
+     * <p>Whatever the usage figure's provenance — a delta this service derived, or the
+     * sessionUsage an event reported for itself on the paths that derive nothing — it is
+     * sanitised here, at the one point where it becomes part of the document. START and COA
+     * events take the payload's figure untouched by {@link #computeInstanceUsage}, so a guard
+     * on that method alone would leave them able to write a wrapped counter into the index that
+     * the dump then sums.
      */
     private SessionInstanceInfo createInstanceInfo(AccountingEvent event, Long instanceUsageOverride) {
         SessionInstanceInfo info = new SessionInstanceInfo();
@@ -445,7 +481,14 @@ public class SessionService {
 
         if (event.getPayload().getAccounting() != null) {
             Accounting accounting = event.getPayload().getAccounting();
-            info.setUsage(instanceUsageOverride != null ? instanceUsageOverride : accounting.getSessionUsage());
+            long usage = instanceUsageOverride != null ? instanceUsageOverride : accounting.getSessionUsage();
+            long recorded = UsageCounters.sanitize(usage);
+            if (recorded != usage) {
+                LoggingUtil.logWarn(LOG, "createInstanceInfo",
+                        "Usage %d on event %s is a 32-bit counter regression, not volume; recording %d instead",
+                        usage, event.getEventId(), recorded);
+            }
+            info.setUsage(recorded);
             info.setServiceId(accounting.getServiceId());
             info.setBucketId(accounting.getBucketId());
         } else {
